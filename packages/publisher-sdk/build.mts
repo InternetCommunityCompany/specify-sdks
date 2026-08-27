@@ -1,28 +1,13 @@
 import { execSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { rollup } from "rollup";
-import dts from "rollup-plugin-dts";
 
 // Ensure a clean state for the new build output
 rmSync(resolve(process.cwd(), "dist"), { force: true, recursive: true });
-rmSync(resolve(process.cwd(), ".declarations"), { force: true, recursive: true });
 
 // First, generate TypeScript declarations
 console.log("Generating TypeScript declarations...");
-execSync("bun run tsc --emitDeclarationOnly --outDir .declarations -p tsconfig.build.json", { stdio: "inherit" });
-
-const declarationBundle = await rollup({
-  input: resolve(process.cwd(), ".declarations/index.d.ts"),
-  plugins: [dts()],
-});
-await declarationBundle.write({
-  file: resolve(process.cwd(), "dist/index.d.ts"),
-  format: "es",
-  sourcemap: true,
-});
-await declarationBundle.close();
-rmSync(resolve(process.cwd(), ".declarations"), { force: true, recursive: true });
+execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", { stdio: "inherit" });
 
 // Then build with Bun
 console.log("Building with Bun...");
