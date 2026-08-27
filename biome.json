@@ -1,0 +1,73 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+  "extends": ["ultracite/biome/core"],
+  "files": {
+    "includes": ["**", "!!**/node_modules", "!!**/dist", "!!**/coverage"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "globals": ["Bun"],
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "rules": {
+      "performance": {
+        "useTopLevelRegex": "off"
+      },
+      "style": {
+        "noEnum": "off",
+        "noParameterProperties": "off",
+        "useConsistentMemberAccessibility": "off"
+      },
+      "suspicious": {
+        "noBiomeFirstException": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/publisher-sdk/src/**",
+        "packages/publisher-sdk/test/**"
+      ],
+      "assist": {
+        "actions": {
+          "source": {
+            "organizeImports": "off",
+            "useSortedInterfaceMembers": "off",
+            "useSortedKeys": "off"
+          }
+        }
+      },
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          },
+          "correctness": {
+            "noUnusedInstantiation": "off"
+          },
+          "performance": {
+            "noAwaitInLoops": "off",
+            "noBarrelFile": "off",
+            "noNamespaceImport": "off"
+          },
+          "style": {
+            "noNestedTernary": "off",
+            "useErrorCause": "off"
+          },
+          "suspicious": {
+            "noEvolvingTypes": "off"
+          }
+        }
+      }
+    }
+  ]
+}
