@@ -2,11 +2,6 @@ const SERVE_URL = "https://spfsrv.com/v1/ads";
 
 const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 
-interface ErrorDetail {
-  field: string;
-  message: string;
-}
-
 interface ServeOptions {
   adUnitId?: string;
   imageFormat: ImageFormat;
@@ -47,12 +42,9 @@ export interface SpecifyAd {
 }
 
 export class ValidationError extends Error {
-  readonly details?: ErrorDetail[];
-
-  constructor(message: string, details?: ErrorDetail[]) {
+  constructor(message: string) {
     super(message);
     this.name = "ValidationError";
-    this.details = details;
   }
 }
 
@@ -144,10 +136,6 @@ export default class Specify {
         },
         method: "POST",
       });
-
-      if (response.status === 204) {
-        return null;
-      }
 
       if (response.status !== 200) {
         return null;
