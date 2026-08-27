@@ -41,12 +41,12 @@ yarn add @specify-sh/publisher-sdk
 ## Basic Usage
 
 ```js
-import Specify, { AuthenticationError, ValidationError, NotFoundError, APIError, ImageFormat } from "@specify-sh/publisher-sdk";
+import Specify, { ImageFormat, ValidationError } from "@specify-sh/publisher-sdk";
 
-// Initialize with your publisher key and enable wallet caching
+// Read this signal from your consent management platform on each page load.
 const specify = new Specify({
   publisherKey: "your_publisher_key",
-  cacheMostRecentAddress: true // Do not enable this in server environments
+  cookieConsent: true
 });
 
 // Serve content based on wallet address
@@ -54,22 +54,14 @@ async function serveContent() {
   try {
     const walletAddress = "0x1234567890123456789012345678901234567890";
 
-    // Serve content with a provided wallet address. The SDK will also use the wallet cache if available.
+    // Serve content with a provided wallet address.
     const content = await specify.serve(walletAddress, {imageFormat: ImageFormat.LANDSCAPE, adUnitId: "header-banner-1"});
 
-    // Or; serve content solely relying on the addresses cache (Only works if you have cacheAddressesInLocalSession enabled.)
-    const content = await specify.serve(undefined, {imageFormat: ImageFormat.SHORT_BANNER, adUnitId: "sidebar-ad-1"});
+    // With cookie consent, a request can also rely on Specify's identity cookie without a wallet.
+    const cookieContent = await specify.serve(undefined, {imageFormat: ImageFormat.SHORT_BANNER, adUnitId: "sidebar-ad-1"});
   } catch (error) {
-    if (error instanceof AuthenticationError) {
-      // Handle authentication errors
-    } else if (error instanceof ValidationError) {
+    if (error instanceof ValidationError) {
       // Handle validation errors
-    } else if (error instanceof NotFoundError) {
-      // Handle no ad found error
-    } else if (error instanceof APIError) {
-      // Handle API errors
-    } else {
-      // Handle other errors
     }
   }
 }
@@ -91,7 +83,7 @@ const addresses = [
   "0x9876543210987654321098765432109876543210"
 ];
 
-// Serve content with multiple provided addresses + SDK memory.
+// Serve content with multiple provided addresses.
 const content = await specify.serve(addresses, {imageFormat: ImageFormat.LONG_BANNER, adUnitId: "ad-unit-2"});
 ```
 
@@ -102,31 +94,32 @@ const content = await specify.serve(addresses, {imageFormat: ImageFormat.LONG_BA
 Creates a new instance of the Specify client.
 
 - `config.publisherKey` - Your publisher API key (required, format: `spk_` followed by 30 alphanumeric characters)
-- `config.cacheMostRecentAddress` - Optional boolean, defaults to `false`. Set to `true` to enable caching the most recent wallet data across requests in supported environments (e.g., browser `localStorage`).
+- `config.cookieConsent` - Optional boolean, defaults to `false`. Pass the publisher's own consent signal for Specify's identity cookie. Set it from your consent management platform on each page load. The SDK never persists it.
 
 ### `specify.serve(addressOrAddresses, {imageFormat, adUnitId})`
 
 Serves content based on the provided wallet address(es).
 
-- `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined` if relying solely on the cached wallet data. If `cacheMostRecentAddress` is `true`, the SDK will attempt to use the cached wallet data if available, either independently or in conjunction with provided addresses.
+- `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined`. With `cookieConsent: true`, an empty value still sends a request so the service can use its identity cookie.
   - Format: Standard EVM address format: `0x123...`
   - Automatically deduplicated by the SDK
 - `imageFormat` - Required image format, one of the `ImageFormat` members
 - `adUnitId` - Optional arbitrary string identifier to identify where the ad is being displayed
-- Returns: Promise resolving to ad content object (returns `null` if no ad is found)
+- Returns: Promise resolving to an ad content object on a successful 200 response. Returns `null` for no-fill, any API failure, or a network failure.
+
+Requests are sent to `https://spfsrv.com/v1/ads` with credentials included so the service can read or set its consent-gated identity cookie.
 
 #### Response Object
 
 ```typescript
 interface SpecifyAd {
-  walletAddress: string;
   campaignId: string;
   adId: string;
   headline: string;
   content: string;
   ctaUrl: string;
   ctaLabel: string;
-  imageUrl: string;
+  imageUrl: string | null;
   communityName: string;
   communityLogo: string;
   imageFormat: "LANDSCAPE" | "LONG_BANNER" | "SHORT_BANNER" | "NO_IMAGE";  
@@ -149,10 +142,9 @@ interface SpecifyAd {
 
 ### Error Types
 
-- `AuthenticationError` - Invalid API key format or authentication failure
-- `ValidationError` - Invalid wallet address format, or too many addresses (>50)
-- `NotFoundError` - No ad found for the provided address(es)
-- `APIError` - Network errors or other HTTP errors
+- `ValidationError` - Invalid publisher key format, invalid wallet address format, or too many unique addresses (>50).
+
+`serve()` does not throw for network failures or API responses, including authentication and validation responses from the service. Those outcomes resolve to `null`, allowing the host page to continue without rendering an ad.
 
 ---
 
