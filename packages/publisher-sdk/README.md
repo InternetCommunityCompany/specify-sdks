@@ -17,6 +17,9 @@
 
 ---
 
+> **Not on npm yet.** `@specify-sh/publisher-sdk` has not been published. The SDK currently on npm is
+> [`@specify-sh/sdk`](https://www.npmjs.com/package/@specify-sh/sdk), which is deprecated and no longer updated.
+
 > Now in beta!
 
 The Specify Publisher SDK enables publishers to serve targeted ad content to users based on their wallet addresses.
@@ -108,7 +111,7 @@ Serves content based on the provided wallet address(es).
 - `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined` if relying solely on the cached wallet data. If `cacheMostRecentAddress` is `true`, the SDK will attempt to use the cached wallet data if available, either independently or in conjunction with provided addresses.
   - Format: Standard EVM address format: `0x123...`
   - Automatically deduplicated by the SDK
-- `imageFormat` - Required image format from the `ImageFormat` enum
+- `imageFormat` - Required image format, one of the `ImageFormat` members
 - `adUnitId` - Optional arbitrary string identifier to identify where the ad is being displayed
 - Returns: Promise resolving to ad content object (returns `null` if no ad is found)
 
@@ -131,9 +134,9 @@ interface SpecifyAd {
 }
 ```
 
-### `ImageFormat` Enum
+### `ImageFormat`
 
-The `ImageFormat` enum defines the available image format options:
+`ImageFormat` defines the available image format options:
 
 - `ImageFormat.LANDSCAPE` - 16:9 - Landscape-oriented images
 - `ImageFormat.LONG_BANNER` - 8.09:1 - Long banner format
