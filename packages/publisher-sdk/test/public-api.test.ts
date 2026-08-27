@@ -5,10 +5,7 @@ describe("public API", () => {
     const publicApi = await import("../src");
 
     expect(Object.keys(publicApi).sort()).toEqual([
-      "APIError",
-      "AuthenticationError",
       "ImageFormat",
-      "NotFoundError",
       "ValidationError",
       "default",
     ]);
@@ -20,11 +17,6 @@ describe("public API", () => {
       NO_IMAGE: "NO_IMAGE",
       SHORT_BANNER: "SHORT_BANNER",
     });
-    expect(new publicApi.APIError("message").name).toBe("APIError");
-    expect(new publicApi.AuthenticationError("message").name).toBe(
-      "AuthenticationError"
-    );
-    expect(new publicApi.NotFoundError().name).toBe("NotFoundError");
     expect(new publicApi.ValidationError("message").name).toBe(
       "ValidationError"
     );
