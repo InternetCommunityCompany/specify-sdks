@@ -67,6 +67,11 @@ async function serveContent() {
 }
 
 serveContent();
+
+// Reflect a consent change reported by your CMP mid-page, without a reload.
+cmp.on("consent", (granted) => {
+  specify.setCookieConsent(granted);
+});
 ```
 
 ## Advanced Usage
@@ -108,6 +113,31 @@ Serves content based on the provided wallet address(es).
 - Returns: Promise resolving to an ad content object on a successful 200 response. Returns `null` for no-fill, any API failure, or a network failure.
 
 Requests are sent to `https://spfsrv.com/v1/ads` with credentials included so the service can read or set its consent-gated identity cookie.
+
+### `specify.setCookieConsent(granted)`
+
+Updates the consent signal for Specify's identity cookie after construction, so the next `serve()` reflects it without a page reload.
+
+- `granted` - Boolean, whether the user consented to Specify's identity cookie
+- Returns: Nothing
+
+The SDK never stores the value: your consent management platform is the source of truth, and the SDK reads the current value from the instance on every `serve()`. Does nothing outside a browser, such as during a server render.
+
+### `specify.hasCookieConsent()`
+
+Returns the current consent value.
+
+- Returns: Boolean, the value last set through the constructor or `setCookieConsent()`
+
+### `specify.identify(addresses)`
+
+Registers wallet addresses to include in every later `serve()` call, even calls that pass other addresses.
+
+- `addresses` - Single wallet address or array of wallet addresses
+- Returns: Nothing
+- Throws: `ValidationError` when any address in the call is malformed; nothing from that call is registered
+
+Registration merges and never removes: multiple wallets are one person, so a wallet disconnect does not retract an address. The SDK keeps at most the 50 most recently registered addresses. `serve()` sends at most 50 addresses in total, with the ones passed to `serve()` taking priority over registered ones. Does nothing outside a browser, such as during a server render.
 
 #### Response Object
 

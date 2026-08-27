@@ -262,4 +262,243 @@ describe("Specify", () => {
       ).resolves.toEqual(response);
     });
   });
+
+  describe("setCookieConsent", () => {
+    describe.runIf(typeof window !== "undefined")("browser", () => {
+      it("updates what the next serve() sends", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+
+        specify.setCookieConsent(true);
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          cookieConsent: true,
+        });
+        expect(specify.hasCookieConsent()).toBe(true);
+      });
+
+      it("withdraws consent granted in the constructor", async () => {
+        const specify = createSpecify({ cookieConsent: true });
+        setupMockFetch(mockAd);
+        const fetchMock = vi.fn();
+        globalThis.fetch = fetchMock;
+
+        specify.setCookieConsent(false);
+        await expect(
+          specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })
+        ).resolves.toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(specify.hasCookieConsent()).toBe(false);
+      });
+
+      it("is read on each serve, not cached", async () => {
+        const specify = createSpecify({ cookieConsent: true });
+        const { requests } = setupMockFetch(mockAd);
+
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+        specify.setCookieConsent(false);
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          cookieConsent: true,
+        });
+        expect(requestBody(requests[1] ?? {})).toMatchObject({
+          cookieConsent: false,
+        });
+      });
+    });
+
+    describe.runIf(typeof window === "undefined")("node", () => {
+      it("does not change what serve() sends", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+
+        specify.setCookieConsent(true);
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          cookieConsent: false,
+        });
+      });
+    });
+  });
+
+  describe("hasCookieConsent", () => {
+    it("returns the constructor's value", () => {
+      expect(createSpecify().hasCookieConsent()).toBe(false);
+      expect(createSpecify({ cookieConsent: true }).hasCookieConsent()).toBe(
+        true
+      );
+    });
+  });
+
+  describe("identify", () => {
+    describe.runIf(typeof window !== "undefined")("browser", () => {
+      it("sends the identified address on a later serve()", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await specify.serve(undefined, { imageFormat: ImageFormat.LANDSCAPE });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        });
+      });
+
+      it("sends provided and identified addresses, provided first", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+        const other = `0x${"1".repeat(40)}` as Address;
+
+        specify.identify(other);
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS, other],
+        });
+      });
+
+      it("accumulates registrations without removing", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+        const a = `0x${"1".repeat(40)}` as Address;
+        const b = `0x${"2".repeat(40)}` as Address;
+
+        specify.identify(a);
+        specify.identify(b);
+        await specify.serve(undefined, { imageFormat: ImageFormat.LANDSCAPE });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [b, a],
+        });
+      });
+
+      it("sends an address once whether re-identified or also provided", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        });
+      });
+
+      it("changes nothing when given an empty array", async () => {
+        const specify = createSpecify();
+        const fetchMock = vi.fn();
+        globalThis.fetch = fetchMock;
+
+        specify.identify([]);
+        await expect(
+          specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })
+        ).resolves.toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+
+      it("throws and registers nothing when any address is malformed", async () => {
+        const specify = createSpecify();
+        const fetchMock = vi.fn();
+        globalThis.fetch = fetchMock;
+
+        expect(() =>
+          specify.identify([
+            VALID_MOCK_WALLET_ADDRESS,
+            "not-an-address" as Address,
+          ])
+        ).toThrow(ValidationError);
+        await expect(
+          specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })
+        ).resolves.toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+
+      it("keeps only the 50 most recently registered addresses", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+        const many = Array.from(
+          { length: 55 },
+          (_, index) => `0x${index.toString().padStart(40, "0")}` as Address
+        );
+
+        for (const address of many) {
+          specify.identify(address);
+        }
+        await specify.serve(undefined, { imageFormat: ImageFormat.LANDSCAPE });
+
+        const body = requestBody(requests[0] ?? {}) as {
+          walletAddresses: Address[];
+        };
+        expect(body.walletAddresses).toHaveLength(50);
+        expect(body.walletAddresses).toContain(many[54]);
+        expect(body.walletAddresses).not.toContain(many[0]);
+        expect(body.walletAddresses).not.toContain(many[4]);
+      });
+
+      it("truncates the merged list rather than rejecting the call", async () => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+        const registered = Array.from(
+          { length: 50 },
+          (_, index) => `0x${index.toString().padStart(40, "0")}` as Address
+        );
+        const provided = Array.from(
+          { length: 3 },
+          (_, index) =>
+            `0x${(index + 100).toString().padStart(40, "0")}` as Address
+        );
+
+        for (const address of registered) {
+          specify.identify(address);
+        }
+        await specify.serve(provided, { imageFormat: ImageFormat.LANDSCAPE });
+
+        const body = requestBody(requests[0] ?? {}) as {
+          walletAddresses: Address[];
+        };
+        expect(body.walletAddresses).toHaveLength(50);
+        for (const address of provided) {
+          expect(body.walletAddresses).toContain(address);
+        }
+      });
+    });
+
+    describe.runIf(typeof window === "undefined")("node", () => {
+      it("does not throw for a valid address and registers nothing", async () => {
+        const specify = createSpecify();
+        const fetchMock = vi.fn();
+        globalThis.fetch = fetchMock;
+
+        expect(() => specify.identify(VALID_MOCK_WALLET_ADDRESS)).not.toThrow();
+        await expect(
+          specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })
+        ).resolves.toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+
+      it("does not throw for a malformed address", () => {
+        const specify = createSpecify();
+
+        expect(() =>
+          specify.identify("not-an-address" as Address)
+        ).not.toThrow();
+      });
+    });
+  });
 });
