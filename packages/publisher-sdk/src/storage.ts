@@ -2,7 +2,11 @@ const LOCAL_ID_KEY = "__specify_local_id";
 
 function getLocalStorage(): Storage | undefined {
   try {
-    if (typeof window !== "undefined" && typeof window.document !== "undefined" && window.localStorage) {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.document !== "undefined" &&
+      window.localStorage
+    ) {
       return window.localStorage;
     }
   } catch {

@@ -1,20 +1,26 @@
 import { describe, expect, it } from "vitest";
-import Specify, { APIError, AuthenticationError, ValidationError, ImageFormat, type Address } from "../src";
+import Specify, {
+  type Address,
+  APIError,
+  AuthenticationError,
+  ImageFormat,
+  ValidationError,
+} from "../src";
 import { VALID_MOCK_PUBLISHER_KEY, VALID_MOCK_WALLET_ADDRESS } from "./consts";
 import { setupMockFetch } from "./helpers";
 
 interface MockSpecifyAd {
-  walletAddress?: string;
-  campaignId?: string;
   adId?: string;
-  headline?: string;
-  content?: string;
-  imageUrl?: string;
-  ctaUrl?: string;
-  ctaLabel?: string;
-  error?: string;
-  communityName?: string;
+  campaignId?: string;
   communityLogo?: string;
+  communityName?: string;
+  content?: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+  error?: string;
+  headline?: string;
+  imageUrl?: string;
+  walletAddress?: string;
 }
 
 describe("Specify", () => {
@@ -27,23 +33,18 @@ describe("Specify", () => {
     });
 
     it("should throw AuthenticationError with invalid publisher key", () => {
-      expect(() => {
-        new Specify({
-          publisherKey: "invalid_key",
-        });
-      }).toThrow(ValidationError);
+      expect(() => new Specify({ publisherKey: "invalid_key" })).toThrow(
+        ValidationError
+      );
 
-      expect(() => {
-        new Specify({
-          publisherKey: "spk_short",
-        });
-      }).toThrow(ValidationError);
+      expect(() => new Specify({ publisherKey: "spk_short" })).toThrow(
+        ValidationError
+      );
 
-      expect(() => {
-        new Specify({
-          publisherKey: `spk_${"a".repeat(31)}`, // Too long
-        });
-      }).toThrow(ValidationError);
+      // 35 characters, one over the allowed length
+      expect(
+        () => new Specify({ publisherKey: `spk_${"a".repeat(31)}` })
+      ).toThrow(ValidationError);
     });
   });
 
@@ -54,36 +55,53 @@ describe("Specify", () => {
       });
 
       const mockResponse = {
-        walletAddress: VALID_MOCK_WALLET_ADDRESS,
-        campaignId: "abcd1234567",
         adId: "A",
-        headline: "Bored Ape Yacht Club Collection",
-        content: "Join the club with the hottest NFTs in the metaverse.",
-        imageUrl: "https://example.com/image.jpg",
-        ctaUrl: "https://boredapeyachtclub.com/collection",
-        ctaLabel: "Mint Now",
-        communityName: "Outposts",
+        campaignId: "abcd1234567",
         communityLogo:
           "https://outpostscdn.com/file/outposts/8b44e98c-6753-4d00-91a7-811347bf0888/logos/bbafcd7b-e52c-4e4f-8764-8f45187825f6",
+        communityName: "Outposts",
+        content: "Join the club with the hottest NFTs in the metaverse.",
+        ctaLabel: "Mint Now",
+        ctaUrl: "https://boredapeyachtclub.com/collection",
+        headline: "Bored Ape Yacht Club Collection",
+        imageUrl: "https://example.com/image.jpg",
+        walletAddress: VALID_MOCK_WALLET_ADDRESS,
       };
 
       setupMockFetch<MockSpecifyAd>(mockResponse);
 
-      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE });
+      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
 
       expect(content).toBeDefined();
-      expect(content).toHaveProperty("walletAddress", VALID_MOCK_WALLET_ADDRESS);
+      expect(content).toHaveProperty(
+        "walletAddress",
+        VALID_MOCK_WALLET_ADDRESS
+      );
       expect(content).toHaveProperty("campaignId", "abcd1234567");
       expect(content).toHaveProperty("adId", "A");
-      expect(content).toHaveProperty("headline", "Bored Ape Yacht Club Collection");
-      expect(content).toHaveProperty("content", "Join the club with the hottest NFTs in the metaverse.");
-      expect(content).toHaveProperty("imageUrl", "https://example.com/image.jpg");
-      expect(content).toHaveProperty("ctaUrl", "https://boredapeyachtclub.com/collection");
+      expect(content).toHaveProperty(
+        "headline",
+        "Bored Ape Yacht Club Collection"
+      );
+      expect(content).toHaveProperty(
+        "content",
+        "Join the club with the hottest NFTs in the metaverse."
+      );
+      expect(content).toHaveProperty(
+        "imageUrl",
+        "https://example.com/image.jpg"
+      );
+      expect(content).toHaveProperty(
+        "ctaUrl",
+        "https://boredapeyachtclub.com/collection"
+      );
       expect(content).toHaveProperty("ctaLabel", "Mint Now");
       expect(content).toHaveProperty("communityName", "Outposts");
       expect(content).toHaveProperty(
         "communityLogo",
-        "https://outpostscdn.com/file/outposts/8b44e98c-6753-4d00-91a7-811347bf0888/logos/bbafcd7b-e52c-4e4f-8764-8f45187825f6",
+        "https://outpostscdn.com/file/outposts/8b44e98c-6753-4d00-91a7-811347bf0888/logos/bbafcd7b-e52c-4e4f-8764-8f45187825f6"
       );
     });
 
@@ -93,25 +111,30 @@ describe("Specify", () => {
       });
 
       const mockResponse = {
-        walletAddress: VALID_MOCK_WALLET_ADDRESS,
-        campaignId: "abcd1234567",
         adId: "A",
-        headline: "Bored Ape Yacht Club Collection",
-        content: "Join the club with the hottest NFTs in the metaverse.",
-        imageUrl: "https://example.com/image.jpg",
-        ctaUrl: "https://boredapeyachtclub.com/collection",
-        ctaLabel: "Mint Now",
-        communityName: "Outposts",
+        campaignId: "abcd1234567",
         communityLogo:
           "https://outpostscdn.com/file/outposts/8b44e98c-6753-4d00-91a7-811347bf0888/logos/bbafcd7b-e52c-4e4f-8764-8f45187825f6",
+        communityName: "Outposts",
+        content: "Join the club with the hottest NFTs in the metaverse.",
+        ctaLabel: "Mint Now",
+        ctaUrl: "https://boredapeyachtclub.com/collection",
+        headline: "Bored Ape Yacht Club Collection",
+        imageUrl: "https://example.com/image.jpg",
+        walletAddress: VALID_MOCK_WALLET_ADDRESS,
       };
 
       setupMockFetch<MockSpecifyAd>(mockResponse);
 
-      const content = await specify.serve([VALID_MOCK_WALLET_ADDRESS], { imageFormat: ImageFormat.LANDSCAPE });
+      const content = await specify.serve([VALID_MOCK_WALLET_ADDRESS], {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
 
       expect(content).toBeDefined();
-      expect(content).toHaveProperty("walletAddress", VALID_MOCK_WALLET_ADDRESS);
+      expect(content).toHaveProperty(
+        "walletAddress",
+        VALID_MOCK_WALLET_ADDRESS
+      );
     });
 
     it("should deduplicate addresses in array", async () => {
@@ -120,28 +143,34 @@ describe("Specify", () => {
       });
 
       const mockResponse = {
-        walletAddress: VALID_MOCK_WALLET_ADDRESS,
-        campaignId: "abcd1234567",
         adId: "A",
-        headline: "Bored Ape Yacht Club Collection",
-        content: "Join the club with the hottest NFTs in the metaverse.",
-        imageUrl: "https://example.com/image.jpg",
-        ctaUrl: "https://boredapeyachtclub.com/collection",
-        ctaLabel: "Mint Now",
-        communityName: "Outposts",
+        campaignId: "abcd1234567",
         communityLogo:
           "https://outpostscdn.com/file/outposts/8b44e98c-6753-4d00-91a7-811347bf0888/logos/bbafcd7b-e52c-4e4f-8764-8f45187825f6",
+        communityName: "Outposts",
+        content: "Join the club with the hottest NFTs in the metaverse.",
+        ctaLabel: "Mint Now",
+        ctaUrl: "https://boredapeyachtclub.com/collection",
+        headline: "Bored Ape Yacht Club Collection",
+        imageUrl: "https://example.com/image.jpg",
+        walletAddress: VALID_MOCK_WALLET_ADDRESS,
       };
 
       setupMockFetch<MockSpecifyAd>(mockResponse);
 
       // Pass the same address multiple times
-      const content = await specify.serve([VALID_MOCK_WALLET_ADDRESS, VALID_MOCK_WALLET_ADDRESS], {
-        imageFormat: ImageFormat.LANDSCAPE,
-      });
+      const content = await specify.serve(
+        [VALID_MOCK_WALLET_ADDRESS, VALID_MOCK_WALLET_ADDRESS],
+        {
+          imageFormat: ImageFormat.LANDSCAPE,
+        }
+      );
 
       expect(content).toBeDefined();
-      expect(content).toHaveProperty("walletAddress", VALID_MOCK_WALLET_ADDRESS);
+      expect(content).toHaveProperty(
+        "walletAddress",
+        VALID_MOCK_WALLET_ADDRESS
+      );
     });
 
     it("should throw ValidationError for invalid wallet address", async () => {
@@ -149,12 +178,16 @@ describe("Specify", () => {
         publisherKey: VALID_MOCK_PUBLISHER_KEY,
       });
 
-      await expect(specify.serve("invalid_address" as Address, { imageFormat: ImageFormat.LANDSCAPE })).rejects.toThrow(
-        ValidationError,
-      );
-      await expect(specify.serve("0xinvalid" as Address, { imageFormat: ImageFormat.LANDSCAPE })).rejects.toThrow(
-        ValidationError,
-      );
+      await expect(
+        specify.serve("invalid_address" as Address, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        specify.serve("0xinvalid" as Address, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
+      ).rejects.toThrow(ValidationError);
     });
 
     it("should return null for empty address array when no localId is present", async () => {
@@ -162,7 +195,9 @@ describe("Specify", () => {
         publisherKey: VALID_MOCK_PUBLISHER_KEY,
       });
 
-      await expect(specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })).resolves.toBeNull();
+      await expect(
+        specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toBeNull();
     });
 
     it("should throw ValidationError for too many addresses", async () => {
@@ -170,11 +205,14 @@ describe("Specify", () => {
         publisherKey: VALID_MOCK_PUBLISHER_KEY,
       });
 
-      const manyAddresses = Array.from({ length: 51 }, (_, i) => `0x${i.toString().padStart(40, "0")}` as Address);
-
-      await expect(specify.serve(manyAddresses, { imageFormat: ImageFormat.LANDSCAPE })).rejects.toThrow(
-        ValidationError,
+      const manyAddresses = Array.from(
+        { length: 51 },
+        (_, i) => `0x${i.toString().padStart(40, "0")}` as Address
       );
+
+      await expect(
+        specify.serve(manyAddresses, { imageFormat: ImageFormat.LANDSCAPE })
+      ).rejects.toThrow(ValidationError);
     });
 
     it("should throw NotFoundError when ad is not found", async () => {
@@ -184,7 +222,9 @@ describe("Specify", () => {
 
       setupMockFetch<MockSpecifyAd>({ error: "Not Found" }, 404);
 
-      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE });
+      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
       expect(content).toBeNull();
     });
 
@@ -195,9 +235,11 @@ describe("Specify", () => {
 
       setupMockFetch<MockSpecifyAd>({ error: "Unauthorized" }, 401);
 
-      await expect(specify.serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE })).rejects.toThrow(
-        AuthenticationError,
-      );
+      await expect(
+        specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
+      ).rejects.toThrow(AuthenticationError);
     });
 
     it("should throw ValidationError for 400 status with details", async () => {
@@ -206,14 +248,18 @@ describe("Specify", () => {
       });
 
       const errorResponse = {
+        details: [
+          { field: "walletAddresses", message: "Invalid address format" },
+        ],
         error: "Invalid request",
-        details: [{ field: "walletAddresses", message: "Invalid address format" }],
       };
 
       setupMockFetch<MockSpecifyAd>(errorResponse, 400);
 
       const error = await specify
-        .serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE })
+        .serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
         .catch((e) => e);
       expect(error).toBeInstanceOf(ValidationError);
       expect(error.details).toEqual(errorResponse.details);
@@ -227,7 +273,9 @@ describe("Specify", () => {
       setupMockFetch<MockSpecifyAd>({ error: "Internal Server Error" }, 500);
 
       const error = await specify
-        .serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE })
+        .serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
         .catch((e) => e);
       expect(error).toBeInstanceOf(APIError);
       expect(error.status).toBe(500);
@@ -240,9 +288,11 @@ describe("Specify", () => {
 
       setupMockFetch<MockSpecifyAd>({ error: "Network error" }, 0);
 
-      await expect(specify.serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE })).rejects.toThrow(
-        APIError,
-      );
+      await expect(
+        specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
+      ).rejects.toThrow(APIError);
     });
 
     it("should return content when imageFormat is provided", async () => {
@@ -251,58 +301,66 @@ describe("Specify", () => {
       });
 
       const mockResponse = {
-        walletAddress: VALID_MOCK_WALLET_ADDRESS,
-        campaignId: "abcd1234567",
         adId: "A",
-        headline: "Test Ad with Long Banner Format",
+        campaignId: "abcd1234567",
         content: "Test content for long banner image",
-        imageId: "long_banner123",
-        ctaUrl: "https://example.com",
         ctaLabel: "Click Here",
+        ctaUrl: "https://example.com",
+        headline: "Test Ad with Long Banner Format",
+        imageId: "long_banner123",
+        walletAddress: VALID_MOCK_WALLET_ADDRESS,
       };
 
       setupMockFetch<MockSpecifyAd>(mockResponse);
 
-      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: ImageFormat.LONG_BANNER });
+      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LONG_BANNER,
+      });
 
       expect(content).toBeDefined();
-      expect(content).toHaveProperty("walletAddress", VALID_MOCK_WALLET_ADDRESS);
-      expect(content).toHaveProperty("headline", "Test Ad with Long Banner Format");
+      expect(content).toHaveProperty(
+        "walletAddress",
+        VALID_MOCK_WALLET_ADDRESS
+      );
+      expect(content).toHaveProperty(
+        "headline",
+        "Test Ad with Long Banner Format"
+      );
     });
 
-    it("should work with different image formats", async () => {
+    it.each([
+      ImageFormat.LANDSCAPE,
+      ImageFormat.LONG_BANNER,
+      ImageFormat.SHORT_BANNER,
+      ImageFormat.NO_IMAGE,
+    ])("should work with image format %s", async (format) => {
       const specify = new Specify({
         publisherKey: VALID_MOCK_PUBLISHER_KEY,
       });
 
-      // Test each image format
-      const imageFormats = [
-        ImageFormat.LANDSCAPE,
-        ImageFormat.LONG_BANNER,
-        ImageFormat.SHORT_BANNER,
-        ImageFormat.NO_IMAGE,
-      ];
+      const mockResponse = {
+        adId: "A",
+        campaignId: "abcd1234567",
+        content: `Test content for ${format.toLowerCase()}`,
+        ctaLabel: "Click Here",
+        ctaUrl: "https://example.com",
+        headline: `Test Ad with ${format}`,
+        imageId: `${format.toLowerCase()}123`,
+        walletAddress: VALID_MOCK_WALLET_ADDRESS,
+      };
 
-      for (const format of imageFormats) {
-        const mockResponse = {
-          walletAddress: VALID_MOCK_WALLET_ADDRESS,
-          campaignId: "abcd1234567",
-          adId: "A",
-          headline: `Test Ad with ${format}`,
-          content: `Test content for ${format.toLowerCase()}`,
-          imageId: `${format.toLowerCase()}123`,
-          ctaUrl: "https://example.com",
-          ctaLabel: "Click Here",
-        };
+      setupMockFetch<MockSpecifyAd>(mockResponse);
 
-        setupMockFetch<MockSpecifyAd>(mockResponse);
+      const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: format,
+      });
 
-        const content = await specify.serve(VALID_MOCK_WALLET_ADDRESS, { imageFormat: format });
-
-        expect(content).toBeDefined();
-        expect(content).toHaveProperty("headline", `Test Ad with ${format}`);
-        expect(content).toHaveProperty("walletAddress", VALID_MOCK_WALLET_ADDRESS);
-      }
+      expect(content).toBeDefined();
+      expect(content).toHaveProperty("headline", `Test Ad with ${format}`);
+      expect(content).toHaveProperty(
+        "walletAddress",
+        VALID_MOCK_WALLET_ADDRESS
+      );
     });
   });
 });

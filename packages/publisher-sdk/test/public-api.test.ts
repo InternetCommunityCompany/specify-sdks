@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import * as publicApi from "../src";
 
 describe("public API", () => {
-  it("preserves the complete public surface", () => {
+  it("preserves the complete public surface", async () => {
+    const publicApi = await import("../src");
+
     expect(Object.keys(publicApi).sort()).toEqual([
       "APIError",
       "AuthenticationError",
@@ -20,8 +21,12 @@ describe("public API", () => {
       SHORT_BANNER: "SHORT_BANNER",
     });
     expect(new publicApi.APIError("message").name).toBe("APIError");
-    expect(new publicApi.AuthenticationError("message").name).toBe("AuthenticationError");
+    expect(new publicApi.AuthenticationError("message").name).toBe(
+      "AuthenticationError"
+    );
     expect(new publicApi.NotFoundError().name).toBe("NotFoundError");
-    expect(new publicApi.ValidationError("message").name).toBe("ValidationError");
+    expect(new publicApi.ValidationError("message").name).toBe(
+      "ValidationError"
+    );
   });
 });

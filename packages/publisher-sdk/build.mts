@@ -1,17 +1,20 @@
 import { execSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { build } from "bun";
 
 // Ensure a clean state for the new build output
 rmSync(resolve(process.cwd(), "dist"), { force: true, recursive: true });
 
 // First, generate TypeScript declarations
 console.log("Generating TypeScript declarations...");
-execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", { stdio: "inherit" });
+execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", {
+  stdio: "inherit",
+});
 
 // Then build with Bun
 console.log("Building with Bun...");
-await Bun.build({
+await build({
   drop: ["debugger"], // remove debugger statements
   entrypoints: ["./src/index.ts"],
   env: "disable",

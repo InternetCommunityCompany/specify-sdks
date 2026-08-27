@@ -22,7 +22,9 @@ describe("storage", () => {
       setLocalId("local-123");
 
       expect(getLocalId()).toBe("local-123");
-      expect(window.localStorage.getItem("__specify_local_id")).toBe("local-123");
+      expect(window.localStorage.getItem("__specify_local_id")).toBe(
+        "local-123"
+      );
 
       removeLocalId();
 
