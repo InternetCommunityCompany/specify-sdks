@@ -6,21 +6,14 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-export const setupMockFetch = <T>(
-  response: T,
-  status = 200,
-  contentType = "application/json"
-) => {
+export const setupMockFetch = <T>(response: T, status = 200) => {
   const requests: RequestInit[] = [];
   let body: string | null = null;
   if (status !== 204) {
-    body =
-      contentType === "text/plain"
-        ? String(response)
-        : JSON.stringify(response);
+    body = JSON.stringify(response);
   }
   const mockResponse = new Response(body, {
-    headers: { "Content-Type": contentType },
+    headers: { "Content-Type": "application/json" },
     status,
   });
   const json = vi
