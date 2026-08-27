@@ -1,0 +1,25 @@
+{
+  "name": "specify-sdks",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "check": "ultracite check",
+    "check:fix": "ultracite fix",
+    "test": "vitest run",
+    "types": "bun run --filter '*' types"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.10",
+    "@changesets/cli": "3.0.1",
+    "@types/bun": "1.2.5",
+    "@types/node": "22.13.10",
+    "jsdom": "30.0.1",
+    "typescript": "5.8.2",
+    "ultracite": "7.10.6",
+    "vitest": "4.1.11"
+  }
+}

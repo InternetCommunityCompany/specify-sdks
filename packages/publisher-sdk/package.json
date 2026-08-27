@@ -1,0 +1,39 @@
+{
+  "name": "@specify-sh/publisher-sdk",
+  "version": "0.4.2",
+  "description": "JS SDK for Specify Publishers",
+  "keywords": [
+    "specify",
+    "publisher-sdk",
+    "cptx"
+  ],
+  "homepage": "https://github.com/InternetCommunityCompany/specify-sdks#readme",
+  "bugs": "https://github.com/InternetCommunityCompany/specify-sdks/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/InternetCommunityCompany/specify-sdks.git",
+    "directory": "packages/publisher-sdk"
+  },
+  "license": "MIT",
+  "author": "Specify",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build.mts",
+    "types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {},
+  "publishConfig": {
+    "access": "public"
+  }
+}
