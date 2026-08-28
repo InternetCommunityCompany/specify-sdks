@@ -1,0 +1,13 @@
+{
+  "name": "@specify-sh/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "types": "tsc --noEmit -p tsconfig.json"
+  }
+}

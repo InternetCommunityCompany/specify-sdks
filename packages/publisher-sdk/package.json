@@ -32,7 +32,9 @@
     "build": "bun run build.mts",
     "types": "tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@specify-sh/core": "workspace:*"
+  },
   "publishConfig": {
     "access": "public"
   }
