@@ -34,7 +34,7 @@ await build({
   target: "browser", // Changed from "node" to "browser"
 });
 
-// The core package is never published, so its declarations ship inside this package.
+// The core package is never published, so declarations and source maps cannot reference it.
 cpSync("../core/dist", "dist/_core", { recursive: true });
 for (const file of readdirSync("dist").filter(
   (name) => name.endsWith(".d.ts") || name.endsWith(".map")

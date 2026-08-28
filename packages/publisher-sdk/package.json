@@ -30,11 +30,9 @@
   ],
   "scripts": {
     "build": "bun run build.mts",
-    "prepack": "bun run ../../scripts/package-manifest.mts prepare",
-    "postpack": "bun run ../../scripts/package-manifest.mts restore",
     "types": "tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": {
+  "devDependencies": {
     "@specify-sh/core": "workspace:*"
   },
   "publishConfig": {

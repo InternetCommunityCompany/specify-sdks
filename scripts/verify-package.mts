@@ -5,13 +5,19 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const scratch = mkdtempSync(join(tmpdir(), "specify-package-"));
+
+type PackageManifest = Partial<
+  Record<
+    "dependencies" | "optionalDependencies" | "peerDependencies" | "scripts",
+    Record<string, string>
+  >
+>;
 
 function filesUnder(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -41,24 +47,56 @@ try {
   );
   console.log("Packed and extracted @specify-sh/publisher-sdk");
 
-  const leakedCoreReference = filesUnder(packageDirectory).find(
-    (path) =>
-      statSync(path).isFile() &&
-      readFileSync(path, "utf8").includes("@specify-sh/core")
+  const distDirectory = join(packageDirectory, "dist");
+  const leakedCoreReference = filesUnder(distDirectory).find((path) =>
+    readFileSync(path, "utf8").includes("@specify-sh/core")
   );
   if (leakedCoreReference) {
     throw new Error(`Private core reference found in ${leakedCoreReference}`);
   }
-  console.log("Verified the package contains no @specify-sh/core references");
+  console.log("Verified dist contains no @specify-sh/core references");
+
+  const manifest: PackageManifest = JSON.parse(
+    readFileSync(join(packageDirectory, "package.json"), "utf8")
+  );
+  const privateRuntimeDependency = [
+    manifest.dependencies,
+    manifest.peerDependencies,
+    manifest.optionalDependencies,
+  ]
+    .flatMap((dependencies) => Object.keys(dependencies ?? {}))
+    .find((name) => name.startsWith("@specify-sh/"));
+  if (privateRuntimeDependency) {
+    throw new Error(
+      `Private runtime dependency found: ${privateRuntimeDependency}`
+    );
+  }
+  if (manifest.scripts?.prepack || manifest.scripts?.postpack) {
+    throw new Error(
+      "Packed package must not rewrite its manifest in pack scripts"
+    );
+  }
+  console.log(
+    "Verified the packed manifest has no private runtime dependencies or pack scripts"
+  );
 
   writeFileSync(
     join(scratch, "consumer.ts"),
-    `import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd } from "@specify-sh/publisher-sdk";
+    `import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
 const address: Address = "0x1234567890123456789012345678901234567890";
-const client = new Specify({ publisherKey: "spk_1234567890abcdef1234567890abcd" });
+const config: SpecifyInitConfig = { publisherKey: "spk_1234567890abcdef1234567890abcd" };
+const client: Specify = new Specify(config);
 const imageFormat: ImageFormatType = ImageFormat.LANDSCAPE;
 const ad: Promise<SpecifyAd | null> = client.serve(address, { imageFormat });
+function validationMessage(error: unknown): string {
+  if (error instanceof ValidationError) {
+    const validation: ValidationError = error;
+    return validation.message;
+  }
+  return "";
+}
 void ad;
+void validationMessage;
 `
   );
   writeFileSync(

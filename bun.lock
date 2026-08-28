@@ -23,7 +23,7 @@
     "packages/publisher-sdk": {
       "name": "@specify-sh/publisher-sdk",
       "version": "0.4.2",
-      "dependencies": {
+      "devDependencies": {
         "@specify-sh/core": "workspace:*",
       },
     },

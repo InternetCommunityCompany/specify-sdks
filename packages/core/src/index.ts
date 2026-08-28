@@ -20,6 +20,7 @@ export type AdRequest = CoreAdRequest;
 export type Address = CoreAddress;
 export type ImageFormat = CoreImageFormatType;
 export type SpecifyAd = CoreSpecifyAd;
+export type ValidationError = CoreValidationError;
 export const ImageFormat = CoreImageFormat;
 export const ValidationError = CoreValidationError;
 export const MAX_WALLET_ADDRESSES = CORE_MAX_WALLET_ADDRESSES;
