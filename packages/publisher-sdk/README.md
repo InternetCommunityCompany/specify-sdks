@@ -131,16 +131,6 @@ Returns the current consent value.
 
 - Returns: Boolean, the current consent value; `false` until `setCookieConsent(true)` grants it
 
-### `specify.identify(addresses)`
-
-Registers wallet addresses to include in every later `serve()` call, even calls that pass other addresses.
-
-- `addresses` - Single wallet address or array of wallet addresses
-- Returns: Nothing
-- Throws: `ValidationError` in a browser, when any address in the call is malformed; nothing from that call is registered. Outside a browser the call returns before validating, so it never throws there.
-
-Registration merges and never removes: multiple wallets are one person, so a wallet disconnect does not retract an address. The SDK keeps at most the 50 most recently registered addresses. `serve()` sends at most 50 addresses in total, with the ones passed to `serve()` taking priority over registered ones. Does nothing outside a browser, such as during a server render.
-
 #### Response Object
 
 ```typescript

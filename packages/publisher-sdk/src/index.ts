@@ -62,17 +62,6 @@ function toAddressArray(
 
 const MAX_WALLET_ADDRESSES = 50;
 
-function mergeIdentified(
-  provided: Address[],
-  identified: ReadonlySet<Address>
-): Address[] {
-  const identifiedNewestFirst = [...identified].reverse();
-  return [...new Set([...provided, ...identifiedNewestFirst])].slice(
-    0,
-    MAX_WALLET_ADDRESSES
-  );
-}
-
 /**
  * Specify Publisher SDK client
  *
@@ -82,8 +71,6 @@ export default class Specify {
   private readonly publisherKey: string;
 
   private cookieConsent = false;
-
-  private readonly identifiedAddresses = new Set<Address>();
 
   /**
    * Creates a new Specify client instance
@@ -133,40 +120,6 @@ export default class Specify {
   }
 
   /**
-   * Registers wallet addresses to include in every later serve() call
-   *
-   * Use this when the user connects a wallet, so its address rides along on
-   * every serve() even when the call itself passes other addresses.
-   * Registration merges and never removes: multiple wallets are one person,
-   * so a disconnect does not retract an address. The SDK keeps at most the 50
-   * most recently registered addresses. Does nothing outside a browser, such
-   * as during a server render.
-   *
-   * @param addresses - Single wallet address or array of wallet addresses
-   * @throws {ValidationError} In a browser, when any address in the call is malformed; nothing from that call is registered. Outside a browser the call returns before validating, so it never throws there.
-   * @returns Nothing
-   */
-  identify(addresses: Address | Address[]): void {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const provided = toAddressArray(addresses);
-    if (!areValidAddresses(provided)) {
-      throw new ValidationError("Invalid wallet address format");
-    }
-    for (const address of provided) {
-      this.identifiedAddresses.add(address);
-    }
-    while (this.identifiedAddresses.size > MAX_WALLET_ADDRESSES) {
-      const oldest = this.identifiedAddresses.values().next().value;
-      if (oldest === undefined) {
-        break;
-      }
-      this.identifiedAddresses.delete(oldest);
-    }
-  }
-
-  /**
    * Serves content to the specified wallet address(es)
    *
    * @param addressOrAddresses - Single wallet address, array of wallet addresses, an empty array, or undefined
@@ -192,13 +145,7 @@ export default class Specify {
       throw new ValidationError("Maximum 50 wallet addresses allowed");
     }
 
-    // provided first in the order given, then identified newest first, deduped, capped at 50
-    const walletAddresses = mergeIdentified(
-      uniqueProvided,
-      this.identifiedAddresses
-    );
-
-    if (walletAddresses.length === 0 && !this.cookieConsent) {
+    if (uniqueProvided.length === 0 && !this.cookieConsent) {
       return null;
     }
 
@@ -208,7 +155,7 @@ export default class Specify {
           adUnitId: options.adUnitId,
           cookieConsent: this.cookieConsent,
           imageFormat: options.imageFormat,
-          walletAddresses,
+          walletAddresses: uniqueProvided,
         }),
         credentials: "include",
         headers: {
