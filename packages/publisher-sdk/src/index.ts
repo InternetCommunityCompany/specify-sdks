@@ -62,6 +62,44 @@ function toAddressArray(
 
 const MAX_WALLET_ADDRESSES = 50;
 
+function resolveServeArgs(
+  first: ServeOptions | Address | Address[] | undefined | null,
+  second?: ServeOptions
+): {
+  addresses: Address | Address[] | undefined | null;
+  options: ServeOptions;
+} {
+  if (typeof first === "object" && first !== null && !Array.isArray(first)) {
+    return { addresses: undefined, options: first };
+  }
+  if (!second) {
+    throw new ValidationError(
+      "serve() needs an options object with an imageFormat; pass serve({ imageFormat }) or serve(addresses, { imageFormat })"
+    );
+  }
+  return { addresses: first, options: second };
+}
+
+function mergeIdentified(
+  provided: Address[],
+  identifiedNewestFirst: Address[]
+): Address[] {
+  const seen = new Set<string>();
+  const merged: Address[] = [];
+  for (const address of [...provided, ...identifiedNewestFirst]) {
+    const key = address.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(address);
+    if (merged.length === MAX_WALLET_ADDRESSES) {
+      break;
+    }
+  }
+  return merged;
+}
+
 /**
  * Specify Publisher SDK client
  *
@@ -71,6 +109,8 @@ export default class Specify {
   private readonly publisherKey: string;
 
   private cookieConsent = false;
+
+  private readonly identifiedAddresses = new Set<Address>();
 
   /**
    * Creates a new Specify client instance
@@ -120,7 +160,57 @@ export default class Specify {
   }
 
   /**
+   * Registers wallet address(es) to send on every later serve()
+   *
+   * Call this when the user connects a wallet. Registered addresses ride
+   * along on every serve() in either form, merged after any addresses the
+   * caller passes there, and the SDK sends at most 50 addresses in total.
+   * Registration merges and never removes: several wallets can be one
+   * person, and a disconnect does not retract one. Does nothing outside a
+   * browser, such as during a server render.
+   *
+   * @param addressOrAddresses - Single wallet address, array of wallet addresses, an empty array, or undefined
+   * @returns Nothing
+   * @throws {ValidationError} When any wallet address in the batch is malformed; nothing from that call is registered
+   */
+  identify(addressOrAddresses: Address | Address[] | undefined | null): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const addresses = toAddressArray(addressOrAddresses);
+    if (!areValidAddresses(addresses)) {
+      throw new ValidationError("Invalid wallet address format");
+    }
+    for (const address of addresses) {
+      this.identifiedAddresses.delete(address);
+      this.identifiedAddresses.add(address);
+    }
+    while (this.identifiedAddresses.size > MAX_WALLET_ADDRESSES) {
+      const oldest = this.identifiedAddresses.values().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.identifiedAddresses.delete(oldest);
+    }
+  }
+
+  /**
+   * Serves content using the wallets registered through identify() and the
+   * consent signal, without passing addresses at the call site
+   *
+   * @param options - Configuration options containing imageFormat and optional adUnitId
+   * @param options.imageFormat - The desired image format for the ad
+   * @param options.adUnitId - arbitrary string id to identify where the ad is being displayed
+   * @throws {ValidationError} When called with no arguments at all
+   * @returns Ad content on a 200 response, or null for no-fill, API failure, or network failure
+   */
+  serve(options: ServeOptions): Promise<SpecifyAd | null>;
+  /**
    * Serves content to the specified wallet address(es)
+   *
+   * Addresses passed here take priority over the ones registered through
+   * identify(): they are sent first, and the SDK sends at most 50 addresses
+   * in total.
    *
    * @param addressOrAddresses - Single wallet address, array of wallet addresses, an empty array, or undefined
    * @param options - Configuration options containing imageFormat and optional adUnitId
@@ -129,11 +219,16 @@ export default class Specify {
    * @throws {ValidationError} When a wallet address is malformed or more than 50 unique addresses are provided
    * @returns Ad content on a 200 response, or null for no-fill, API failure, or network failure
    */
-  async serve(
+  serve(
     addressOrAddresses: Address | Address[] | undefined | null,
     options: ServeOptions
+  ): Promise<SpecifyAd | null>;
+  async serve(
+    first: ServeOptions | Address | Address[] | undefined | null,
+    second?: ServeOptions
   ): Promise<SpecifyAd | null> {
-    const providedAddresses = toAddressArray(addressOrAddresses);
+    const { addresses, options } = resolveServeArgs(first, second);
+    const providedAddresses = toAddressArray(addresses);
 
     if (!areValidAddresses(providedAddresses)) {
       throw new ValidationError("Invalid wallet address format");
@@ -145,7 +240,12 @@ export default class Specify {
       throw new ValidationError("Maximum 50 wallet addresses allowed");
     }
 
-    if (uniqueProvided.length === 0 && !this.cookieConsent) {
+    const walletAddresses = mergeIdentified(
+      uniqueProvided,
+      [...this.identifiedAddresses].reverse()
+    );
+
+    if (walletAddresses.length === 0 && !this.cookieConsent) {
       return null;
     }
 
@@ -155,7 +255,7 @@ export default class Specify {
           adUnitId: options.adUnitId,
           cookieConsent: this.cookieConsent,
           imageFormat: options.imageFormat,
-          walletAddresses: uniqueProvided,
+          walletAddresses,
         }),
         credentials: "include",
         headers: {

@@ -93,6 +93,22 @@ const addresses = [
 const content = await specify.serve(addresses, {imageFormat: ImageFormat.LONG_BANNER, adUnitId: "ad-unit-2"});
 ```
 
+### Registering connected wallets
+
+Call `identify()` when your user connects a wallet. Registered addresses ride along on every later `serve()` call, in either form, so you do not have to thread them through each call site.
+
+```js
+// When the user connects a wallet:
+specify.identify(walletAddress);
+// Or several at once:
+specify.identify([walletAddress, secondWalletAddress]);
+
+// Every later serve() sends the registered addresses.
+const content = await specify.serve({imageFormat: ImageFormat.LANDSCAPE});
+```
+
+`identify()` does nothing outside a browser, such as during a server render. Registration merges and never removes: several wallets can be one person, and a disconnect does not retract one. The SDK sends at most 50 addresses, and addresses passed to `serve()` take priority over registered ones.
+
 ## API Reference
 
 ### `new Specify(config)`
@@ -102,6 +118,16 @@ Creates a new instance of the Specify client.
 - `config.publisherKey` - Your publisher API key (required, format: `spk_` followed by 30 alphanumeric characters)
 
 A new instance starts without consent, and `setCookieConsent()` is how consent is given. Consent can only be granted in a browser: the setter does nothing during a server render, so a server-side `serve()` with no addresses returns `null` without sending a request.
+
+### `specify.serve({imageFormat, adUnitId})`
+
+Serves content using the wallets registered through `identify()` and the consent signal, without passing addresses at the call site.
+
+- `imageFormat` - Required image format, one of the `ImageFormat` members
+- `adUnitId` - Optional arbitrary string identifier to identify where the ad is being displayed
+- Returns: Promise resolving to an ad content object on a successful 200 response. Returns `null` for no-fill, any API failure, or a network failure.
+
+Registered addresses are merged with any the caller passes, up to the 50-address limit. Without consent, without registered addresses, and without addresses at the call site, no request is sent and `null` is returned.
 
 ### `specify.serve(addressOrAddresses, {imageFormat, adUnitId})`
 
@@ -114,7 +140,18 @@ Serves content based on the provided wallet address(es).
 - `adUnitId` - Optional arbitrary string identifier to identify where the ad is being displayed
 - Returns: Promise resolving to an ad content object on a successful 200 response. Returns `null` for no-fill, any API failure, or a network failure.
 
+Addresses passed here take priority over the ones registered through `identify()`: they are sent first, and the SDK sends at most 50 addresses in total.
+
 Requests are sent to `https://spfsrv.com/v1/ads` with credentials included so the service can read or set its consent-gated identity cookie.
+
+### `specify.identify(addressOrAddresses)`
+
+Registers wallet address(es) to send on every later `serve()` call.
+
+- `addressOrAddresses` - Single wallet address, array of wallet addresses, an empty array, or `undefined`
+- Returns: Nothing
+
+Call this when the user connects a wallet. Registration merges and never removes: several wallets can be one person, and a disconnect does not retract one. The SDK keeps the 50 most recent registrations and sends at most 50 addresses in total, with the ones passed to `serve()` taking priority. Does nothing outside a browser, such as during a server render. Throws `ValidationError` when any address in the batch is malformed, and nothing from that call is registered.
 
 ### `specify.setCookieConsent(granted)`
 
