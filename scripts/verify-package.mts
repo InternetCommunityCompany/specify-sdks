@@ -83,11 +83,16 @@ try {
   writeFileSync(
     join(scratch, "consumer.ts"),
     `import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
+import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
 const address: Address = "0x1234567890123456789012345678901234567890";
 const config: SpecifyInitConfig = { publisherKey: "spk_1234567890abcdef1234567890abcd" };
 const client: Specify = new Specify(config);
 const imageFormat: ImageFormatType = ImageFormat.LANDSCAPE;
 const ad: Promise<SpecifyAd | null> = client.serve(address, { imageFormat });
+const serverAddress: ServerAddress = address;
+const serverImageFormat: ServerImageFormatType = ServerImageFormat.LANDSCAPE;
+const serverOptions: ServeOptions = { publisherKey: config.publisherKey, walletAddresses: [serverAddress], imageFormat: serverImageFormat };
+const serverAd: Promise<ServerSpecifyAd | null> = serve(serverOptions);
 function validationMessage(error: unknown): string {
   if (error instanceof ValidationError) {
     const validation: ValidationError = error;
@@ -95,8 +100,17 @@ function validationMessage(error: unknown): string {
   }
   return "";
 }
+function serverValidationMessage(error: unknown): string {
+  if (error instanceof ServerValidationError) {
+    const validation: ServerValidationErrorType = error;
+    return validation.message;
+  }
+  return "";
+}
 void ad;
+void serverAd;
 void validationMessage;
+void serverValidationMessage;
 `
   );
   writeFileSync(
@@ -117,6 +131,34 @@ void validationMessage;
     { cwd: scratch, stdio: "inherit" }
   );
   console.log("Type-checked a consumer with only the packed package installed");
+
+  const guardMessage = execFileSync(
+    "node",
+    [
+      "--conditions=react-server",
+      "-e",
+      'import("@specify-sh/publisher-sdk").then(() => process.exit(1)).catch((error) => { console.log(error.message); })',
+    ],
+    { cwd: scratch, encoding: "utf8" }
+  ).trim();
+  if (!guardMessage.includes("@specify-sh/publisher-sdk/server")) {
+    throw new Error(
+      `React Server Component guard did not name /server: ${guardMessage}`
+    );
+  }
+  console.log(
+    "Verified the react-server condition directs consumers to /server"
+  );
+
+  execFileSync(
+    "node",
+    [
+      "-e",
+      'import("@specify-sh/publisher-sdk").then((module) => { if (typeof module.default !== "function") process.exit(1); })',
+    ],
+    { cwd: scratch, stdio: "inherit" }
+  );
+  console.log("Verified the default condition exposes the browser entry");
 } finally {
   rmSync(scratch, { force: true, recursive: true });
 }

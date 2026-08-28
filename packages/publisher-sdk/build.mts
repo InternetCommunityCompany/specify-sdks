@@ -22,7 +22,7 @@ execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", {
 console.log("Building with Bun...");
 await build({
   drop: ["debugger"], // remove debugger statements
-  entrypoints: ["./src/index.ts"],
+  entrypoints: ["./src/index.ts", "./src/server.ts", "./src/react-server.ts"],
   env: "disable",
   footer: `
       /* Built with ❤️ by Specify team */

@@ -109,6 +109,27 @@ const content = await specify.serve({imageFormat: ImageFormat.LANDSCAPE});
 
 `identify()` does nothing outside a browser, such as during a server render. Registration merges and never removes: several wallets can be one person, and a disconnect does not retract one. The SDK sends at most 50 addresses, and addresses passed to `serve()` take priority over registered ones.
 
+## Server usage
+
+Use the server entry when serving an ad outside a browser:
+
+```js
+import { ImageFormat, serve } from "@specify-sh/publisher-sdk/server";
+
+const ad = await serve({
+  publisherKey: "your_publisher_key",
+  walletAddresses: ["0x1234567890123456789012345678901234567890"],
+  imageFormat: ImageFormat.LANDSCAPE,
+  adUnitId: "header-banner-1"
+});
+```
+
+`walletAddresses` is required and must contain at least one address. A server request has no identity cookie to match when the list is empty, so `serve()` throws `ValidationError` instead of returning `null` without a request.
+
+The server entry has no consent state, identity cookie, `identify()` method, or credentials. Invalid publisher keys and wallet addresses throw before the request. After the request starts, no-fill responses, API errors, network failures, and invalid response bodies resolve to `null`.
+
+Importing the bare `@specify-sh/publisher-sdk` package from a React Server Component throws an error that directs you to `@specify-sh/publisher-sdk/server`.
+
 ## API Reference
 
 ### `new Specify(config)`
