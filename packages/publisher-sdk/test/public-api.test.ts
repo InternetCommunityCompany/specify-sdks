@@ -21,4 +21,11 @@ describe("public API", () => {
       "ValidationError"
     );
   });
+
+  it("exposes the instance methods", async () => {
+    const { default: Specify } = await import("../src");
+
+    expect(Specify.prototype.setCookieConsent).toBeTypeOf("function");
+    expect(Specify.prototype.hasCookieConsent).toBeTypeOf("function");
+  });
 });

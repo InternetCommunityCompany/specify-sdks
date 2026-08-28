@@ -43,11 +43,12 @@ yarn add @specify-sh/publisher-sdk
 ```js
 import Specify, { ImageFormat, ValidationError } from "@specify-sh/publisher-sdk";
 
-// Read this signal from your consent management platform on each page load.
 const specify = new Specify({
-  publisherKey: "your_publisher_key",
-  cookieConsent: true
+  publisherKey: "your_publisher_key"
 });
+
+// Consent starts false; grant it from your consent management platform.
+specify.setCookieConsent(true);
 
 // Serve content based on wallet address
 async function serveContent() {
@@ -67,6 +68,11 @@ async function serveContent() {
 }
 
 serveContent();
+
+// Reflect a consent change reported by your CMP mid-page, without a reload.
+cmp.on("consent", (granted) => {
+  specify.setCookieConsent(granted);
+});
 ```
 
 ## Advanced Usage
@@ -94,13 +100,14 @@ const content = await specify.serve(addresses, {imageFormat: ImageFormat.LONG_BA
 Creates a new instance of the Specify client.
 
 - `config.publisherKey` - Your publisher API key (required, format: `spk_` followed by 30 alphanumeric characters)
-- `config.cookieConsent` - Optional boolean, defaults to `false`. Pass the publisher's own consent signal for Specify's identity cookie. Set it from your consent management platform on each page load. The SDK never persists it.
+
+A new instance starts without consent, and `setCookieConsent()` is how consent is given. Consent can only be granted in a browser: the setter does nothing during a server render, so a server-side `serve()` with no addresses returns `null` without sending a request.
 
 ### `specify.serve(addressOrAddresses, {imageFormat, adUnitId})`
 
 Serves content based on the provided wallet address(es).
 
-- `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined`. With `cookieConsent: true`, an empty value still sends a request so the service can use its identity cookie.
+- `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined`. After `setCookieConsent(true)`, an empty value still sends a request so the service can use its identity cookie.
   - Format: Standard EVM address format: `0x123...`
   - Automatically deduplicated by the SDK
 - `imageFormat` - Required image format, one of the `ImageFormat` members
@@ -108,6 +115,21 @@ Serves content based on the provided wallet address(es).
 - Returns: Promise resolving to an ad content object on a successful 200 response. Returns `null` for no-fill, any API failure, or a network failure.
 
 Requests are sent to `https://spfsrv.com/v1/ads` with credentials included so the service can read or set its consent-gated identity cookie.
+
+### `specify.setCookieConsent(granted)`
+
+Updates the consent signal for Specify's identity cookie after construction, so the next `serve()` reflects it without a page reload.
+
+- `granted` - Boolean, whether the user consented to Specify's identity cookie
+- Returns: Nothing
+
+The SDK never stores the value: your consent management platform is the source of truth, and the SDK reads the current value from the instance on every `serve()`. Does nothing outside a browser, such as during a server render.
+
+### `specify.hasCookieConsent()`
+
+Returns the current consent value.
+
+- Returns: Boolean, the current consent value; `false` until `setCookieConsent(true)` grants it
 
 #### Response Object
 
