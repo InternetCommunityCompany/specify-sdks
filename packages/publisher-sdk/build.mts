@@ -1,5 +1,11 @@
 import { execSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import {
+  cpSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import { build } from "bun";
 
@@ -27,5 +33,17 @@ await build({
   sourcemap: "external", // separate .map files instead of inlining
   target: "browser", // Changed from "node" to "browser"
 });
+
+// The core package is never published, so its declarations ship inside this package.
+cpSync("../core/dist", "dist/_core", { recursive: true });
+for (const file of readdirSync("dist").filter(
+  (name) => name.endsWith(".d.ts") || name.endsWith(".map")
+)) {
+  const path = `dist/${file}`;
+  writeFileSync(
+    path,
+    readFileSync(path, "utf8").replaceAll("@specify-sh/core", "./_core/index")
+  );
+}
 
 console.log("✅ Build completed successfully");
