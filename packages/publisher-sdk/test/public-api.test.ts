@@ -27,5 +27,6 @@ describe("public API", () => {
 
     expect(Specify.prototype.setCookieConsent).toBeTypeOf("function");
     expect(Specify.prototype.hasCookieConsent).toBeTypeOf("function");
+    expect(Specify.prototype.identify).toBeTypeOf("function");
   });
 });
