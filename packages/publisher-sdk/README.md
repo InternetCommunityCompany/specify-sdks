@@ -43,11 +43,12 @@ yarn add @specify-sh/publisher-sdk
 ```js
 import Specify, { ImageFormat, ValidationError } from "@specify-sh/publisher-sdk";
 
-// Read this signal from your consent management platform on each page load.
 const specify = new Specify({
-  publisherKey: "your_publisher_key",
-  cookieConsent: true
+  publisherKey: "your_publisher_key"
 });
+
+// Consent starts false; grant it from your consent management platform.
+specify.setCookieConsent(true);
 
 // Serve content based on wallet address
 async function serveContent() {
@@ -99,13 +100,14 @@ const content = await specify.serve(addresses, {imageFormat: ImageFormat.LONG_BA
 Creates a new instance of the Specify client.
 
 - `config.publisherKey` - Your publisher API key (required, format: `spk_` followed by 30 alphanumeric characters)
-- `config.cookieConsent` - Optional boolean, defaults to `false`. Pass the publisher's own consent signal for Specify's identity cookie. Set it from your consent management platform on each page load. The SDK never persists it.
+
+A new instance starts without consent, and `setCookieConsent()` is how consent is given. Consent can only be granted in a browser: the setter does nothing during a server render, so a server-side `serve()` with no addresses returns `null` without sending a request.
 
 ### `specify.serve(addressOrAddresses, {imageFormat, adUnitId})`
 
 Serves content based on the provided wallet address(es).
 
-- `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined`. With `cookieConsent: true`, an empty value still sends a request so the service can use its identity cookie.
+- `addressOrAddresses` - Optional. Single wallet address, array of wallet addresses (max 50), or `undefined`. After `setCookieConsent(true)`, an empty value still sends a request so the service can use its identity cookie.
   - Format: Standard EVM address format: `0x123...`
   - Automatically deduplicated by the SDK
 - `imageFormat` - Required image format, one of the `ImageFormat` members
@@ -127,7 +129,7 @@ The SDK never stores the value: your consent management platform is the source o
 
 Returns the current consent value.
 
-- Returns: Boolean, the value last set through the constructor or `setCookieConsent()`
+- Returns: Boolean, the current consent value; `false` until `setCookieConsent(true)` grants it
 
 ### `specify.identify(addresses)`
 
@@ -135,7 +137,7 @@ Registers wallet addresses to include in every later `serve()` call, even calls 
 
 - `addresses` - Single wallet address or array of wallet addresses
 - Returns: Nothing
-- Throws: `ValidationError` when any address in the call is malformed; nothing from that call is registered
+- Throws: `ValidationError` in a browser, when any address in the call is malformed; nothing from that call is registered. Outside a browser the call returns before validating, so it never throws there.
 
 Registration merges and never removes: multiple wallets are one person, so a wallet disconnect does not retract an address. The SDK keeps at most the 50 most recently registered addresses. `serve()` sends at most 50 addresses in total, with the ones passed to `serve()` taking priority over registered ones. Does nothing outside a browser, such as during a server render.
 

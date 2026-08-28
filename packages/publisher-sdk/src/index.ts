@@ -19,11 +19,6 @@ export const ImageFormat = {
 export type ImageFormat = (typeof ImageFormat)[keyof typeof ImageFormat];
 
 export interface SpecifyInitConfig {
-  /**
-   * Carries the publisher's own consent signal for Specify's identity cookie.
-   * Set this from your CMP on each page load. The SDK never persists it.
-   */
-  cookieConsent?: boolean;
   publisherKey: string;
 }
 
@@ -86,7 +81,7 @@ function mergeIdentified(
 export default class Specify {
   private readonly publisherKey: string;
 
-  private cookieConsent: boolean;
+  private cookieConsent = false;
 
   private readonly identifiedAddresses = new Set<Address>();
 
@@ -95,7 +90,6 @@ export default class Specify {
    *
    * @param config - SDK configuration object
    * @param config.publisherKey - Publisher key used for authentication
-   * @param config.cookieConsent - The publisher's own consent signal for Specify's identity cookie. Set it from your CMP on each page load. The SDK never persists it. Defaults to false.
    * @throws {ValidationError} When publisher key format is invalid
    */
   constructor(config: SpecifyInitConfig) {
@@ -103,16 +97,17 @@ export default class Specify {
       throw new ValidationError("Invalid publisher key format");
     }
     this.publisherKey = config.publisherKey;
-    this.cookieConsent = config.cookieConsent ?? false;
   }
 
   /**
    * Updates the consent signal for Specify's identity cookie
    *
    * Call this when your consent management platform reports a change, so the
-   * next serve() call reflects it without a page reload. Does nothing outside
-   * a browser. The value is never persisted: the publisher's CMP is the source
-   * of truth and it is read from the instance on each serve().
+   * next serve() call reflects it without a page reload. Consent starts false
+   * on a new instance, so this is the only way it ever becomes true. Does
+   * nothing outside a browser, such as during a server render. The value is
+   * never persisted: the publisher's CMP is the source of truth and it is
+   * read from the instance on each serve().
    *
    * @param granted - Whether the user consented to Specify's identity cookie
    * @returns Nothing
@@ -127,7 +122,11 @@ export default class Specify {
   /**
    * Returns the current consent signal
    *
-   * @returns The consent value last set through the constructor or setCookieConsent()
+   * Returns false until setCookieConsent(true) grants it. Outside a browser,
+   * such as during a server render, it is always false because the setter
+   * does nothing there.
+   *
+   * @returns The current consent value
    */
   hasCookieConsent(): boolean {
     return this.cookieConsent;
@@ -140,10 +139,11 @@ export default class Specify {
    * every serve() even when the call itself passes other addresses.
    * Registration merges and never removes: multiple wallets are one person,
    * so a disconnect does not retract an address. The SDK keeps at most the 50
-   * most recently registered addresses. Does nothing outside a browser.
+   * most recently registered addresses. Does nothing outside a browser, such
+   * as during a server render.
    *
    * @param addresses - Single wallet address or array of wallet addresses
-   * @throws {ValidationError} When any address in the call is malformed; nothing from that call is registered
+   * @throws {ValidationError} In a browser, when any address in the call is malformed; nothing from that call is registered. Outside a browser the call returns before validating, so it never throws there.
    * @returns Nothing
    */
   identify(addresses: Address | Address[]): void {

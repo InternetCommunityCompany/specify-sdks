@@ -21,11 +21,8 @@ const mockAd = {
   imageUrl: "https://example.com/image.jpg",
 } satisfies SpecifyAd;
 
-function createSpecify(config: { cookieConsent?: boolean } = {}): Specify {
-  return new Specify({
-    ...config,
-    publisherKey: VALID_MOCK_PUBLISHER_KEY,
-  });
+function createSpecify(): Specify {
+  return new Specify({ publisherKey: VALID_MOCK_PUBLISHER_KEY });
 }
 
 function requestBody(request: RequestInit): unknown {
@@ -36,6 +33,16 @@ describe("Specify", () => {
   describe("constructor", () => {
     it("initializes with a valid publisher key", () => {
       expect(createSpecify()).toBeInstanceOf(Specify);
+    });
+
+    it("ignores a removed cookieConsent option", () => {
+      expect(
+        new Specify({
+          // @ts-expect-error cookieConsent is no longer a constructor option
+          cookieConsent: true,
+          publisherKey: VALID_MOCK_PUBLISHER_KEY,
+        })
+      ).toBeInstanceOf(Specify);
     });
 
     it("throws ValidationError for an invalid publisher key", () => {
@@ -190,19 +197,6 @@ describe("Specify", () => {
       });
     });
 
-    it("sends cookieConsent true when configured", async () => {
-      const specify = createSpecify({ cookieConsent: true });
-      const { requests } = setupMockFetch(mockAd);
-
-      await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
-        imageFormat: ImageFormat.LANDSCAPE,
-      });
-
-      expect(requestBody(requests[0] ?? {})).toMatchObject({
-        cookieConsent: true,
-      });
-    });
-
     it("includes credentials on the request", async () => {
       const specify = createSpecify();
       const { fetch } = setupMockFetch(mockAd);
@@ -215,20 +209,6 @@ describe("Specify", () => {
         "https://spfsrv.com/v1/ads",
         expect.objectContaining({ credentials: "include" })
       );
-    });
-
-    it("issues a request with consent and no addresses", async () => {
-      const specify = createSpecify({ cookieConsent: true });
-      const { fetch, requests } = setupMockFetch(undefined, 204);
-
-      await expect(
-        specify.serve([], { imageFormat: ImageFormat.NO_IMAGE })
-      ).resolves.toBeNull();
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(requestBody(requests[0] ?? {})).toMatchObject({
-        cookieConsent: true,
-        walletAddresses: [],
-      });
     });
 
     it("returns a 200 body exactly as received", async () => {
@@ -280,12 +260,28 @@ describe("Specify", () => {
         expect(specify.hasCookieConsent()).toBe(true);
       });
 
-      it("withdraws consent granted in the constructor", async () => {
-        const specify = createSpecify({ cookieConsent: true });
+      it("issues a request with consent and no addresses", async () => {
+        const specify = createSpecify();
+        const { fetch, requests } = setupMockFetch(undefined, 204);
+
+        specify.setCookieConsent(true);
+        await expect(
+          specify.serve([], { imageFormat: ImageFormat.NO_IMAGE })
+        ).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          cookieConsent: true,
+          walletAddresses: [],
+        });
+      });
+
+      it("withdraws consent granted through the setter", async () => {
+        const specify = createSpecify();
         setupMockFetch(mockAd);
         const fetchMock = vi.fn();
         globalThis.fetch = fetchMock;
 
+        specify.setCookieConsent(true);
         specify.setCookieConsent(false);
         await expect(
           specify.serve([], { imageFormat: ImageFormat.LANDSCAPE })
@@ -295,9 +291,10 @@ describe("Specify", () => {
       });
 
       it("is read on each serve, not cached", async () => {
-        const specify = createSpecify({ cookieConsent: true });
+        const specify = createSpecify();
         const { requests } = setupMockFetch(mockAd);
 
+        specify.setCookieConsent(true);
         await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
           imageFormat: ImageFormat.LANDSCAPE,
         });
@@ -333,11 +330,22 @@ describe("Specify", () => {
   });
 
   describe("hasCookieConsent", () => {
-    it("returns the constructor's value", () => {
-      expect(createSpecify().hasCookieConsent()).toBe(false);
-      expect(createSpecify({ cookieConsent: true }).hasCookieConsent()).toBe(
-        true
-      );
+    describe.runIf(typeof window !== "undefined")("browser", () => {
+      it("is false on a fresh instance and true after granting", () => {
+        const specify = createSpecify();
+        expect(specify.hasCookieConsent()).toBe(false);
+        specify.setCookieConsent(true);
+        expect(specify.hasCookieConsent()).toBe(true);
+      });
+    });
+
+    describe.runIf(typeof window === "undefined")("node", () => {
+      it("stays false because the setter does nothing", () => {
+        const specify = createSpecify();
+        expect(specify.hasCookieConsent()).toBe(false);
+        specify.setCookieConsent(true);
+        expect(specify.hasCookieConsent()).toBe(false);
+      });
     });
   });
 
