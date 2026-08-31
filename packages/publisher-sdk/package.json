@@ -40,7 +40,7 @@
     "build": "bun run build.mts",
     "types": "tsc --noEmit -p tsconfig.json"
   },
-  "devDependencies": {
+  "dependencies": {
     "@specify-sh/core": "workspace:*"
   },
   "publishConfig": {

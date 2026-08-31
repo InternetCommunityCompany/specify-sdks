@@ -1,11 +1,5 @@
 import { execSync } from "node:child_process";
-import {
-  cpSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { build } from "bun";
 
@@ -24,6 +18,7 @@ await build({
   drop: ["debugger"], // remove debugger statements
   entrypoints: ["./src/index.ts", "./src/server.ts", "./src/react-server.ts"],
   env: "disable",
+  external: ["@specify-sh/core"],
   footer: `
       /* Built with ❤️ by Specify team */
     `,
@@ -31,19 +26,8 @@ await build({
   minify: true,
   outdir: "./dist",
   sourcemap: "external", // separate .map files instead of inlining
+  splitting: false,
   target: "browser", // Changed from "node" to "browser"
 });
-
-// The core package is never published, so declarations and source maps cannot reference it.
-cpSync("../core/dist", "dist/_core", { recursive: true });
-for (const file of readdirSync("dist").filter(
-  (name) => name.endsWith(".d.ts") || name.endsWith(".map")
-)) {
-  const path = `dist/${file}`;
-  writeFileSync(
-    path,
-    readFileSync(path, "utf8").replaceAll("@specify-sh/core", "./_core/index")
-  );
-}
 
 console.log("✅ Build completed successfully");
