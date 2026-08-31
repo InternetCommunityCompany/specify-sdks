@@ -16,8 +16,9 @@ execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", {
 console.log("Building with Bun...");
 await build({
   drop: ["debugger"], // remove debugger statements
-  entrypoints: ["./src/index.ts"],
+  entrypoints: ["./src/index.ts", "./src/server.ts", "./src/react-server.ts"],
   env: "disable",
+  external: ["@specify-sh/core"],
   footer: `
       /* Built with ❤️ by Specify team */
     `,
@@ -25,6 +26,7 @@ await build({
   minify: true,
   outdir: "./dist",
   sourcemap: "external", // separate .map files instead of inlining
+  splitting: false,
   target: "browser", // Changed from "node" to "browser"
 });
 

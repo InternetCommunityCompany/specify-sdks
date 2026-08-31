@@ -1,54 +1,30 @@
-const SERVE_URL = "https://spfsrv.com/v1/ads";
+import {
+  assertValidAddresses,
+  assertValidPublisherKey,
+  type Address as CoreAddress,
+  ImageFormat as CoreImageFormat,
+  type ImageFormat as CoreImageFormatType,
+  type SpecifyAd as CoreSpecifyAd,
+  ValidationError as CoreValidationError,
+  MAX_WALLET_ADDRESSES,
+  prepareWalletAddresses,
+  requestAd,
+} from "@specify-sh/core";
 
-const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+export type Address = CoreAddress;
+export type ImageFormat = CoreImageFormatType;
+export type SpecifyAd = CoreSpecifyAd;
+export type ValidationError = CoreValidationError;
+export const ImageFormat = CoreImageFormat;
+export const ValidationError: typeof CoreValidationError = CoreValidationError;
 
 interface ServeOptions {
   adUnitId?: string;
   imageFormat: ImageFormat;
 }
 
-export type Address = `0x${string}`;
-
-export const ImageFormat = {
-  LANDSCAPE: "LANDSCAPE",
-  LONG_BANNER: "LONG_BANNER",
-  NO_IMAGE: "NO_IMAGE",
-  SHORT_BANNER: "SHORT_BANNER",
-} as const;
-
-export type ImageFormat = (typeof ImageFormat)[keyof typeof ImageFormat];
-
 export interface SpecifyInitConfig {
   publisherKey: string;
-}
-
-export interface SpecifyAd {
-  adId: string;
-  adUnitId?: string;
-  campaignId: string;
-  communityLogo: string;
-  communityName: string;
-  content: string;
-  ctaLabel: string;
-  ctaUrl: string;
-  headline: string;
-  imageFormat: ImageFormat;
-  imageUrl: string | null;
-}
-
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-function isValidPublisherKey(key: string): boolean {
-  return key.startsWith("spk_") && key.length === 34;
-}
-
-function areValidAddresses(addresses: Address[]): boolean {
-  return addresses.every((address) => ADDRESS_PATTERN.test(address));
 }
 
 function toAddressArray(
@@ -59,8 +35,6 @@ function toAddressArray(
   }
   return addressOrAddresses ? [addressOrAddresses] : [];
 }
-
-const MAX_WALLET_ADDRESSES = 50;
 
 function resolveServeArgs(
   first: ServeOptions | Address | Address[] | undefined | null,
@@ -120,9 +94,7 @@ export default class Specify {
    * @throws {ValidationError} When publisher key format is invalid
    */
   constructor(config: SpecifyInitConfig) {
-    if (!isValidPublisherKey(config.publisherKey)) {
-      throw new ValidationError("Invalid publisher key format");
-    }
+    assertValidPublisherKey(config.publisherKey);
     this.publisherKey = config.publisherKey;
   }
 
@@ -178,9 +150,7 @@ export default class Specify {
       return;
     }
     const addresses = toAddressArray(addressOrAddresses);
-    if (!areValidAddresses(addresses)) {
-      throw new ValidationError("Invalid wallet address format");
-    }
+    assertValidAddresses(addresses);
     for (const address of addresses) {
       this.identifiedAddresses.delete(address);
       this.identifiedAddresses.add(address);
@@ -229,16 +199,7 @@ export default class Specify {
   ): Promise<SpecifyAd | null> {
     const { addresses, options } = resolveServeArgs(first, second);
     const providedAddresses = toAddressArray(addresses);
-
-    if (!areValidAddresses(providedAddresses)) {
-      throw new ValidationError("Invalid wallet address format");
-    }
-
-    const uniqueProvided = [...new Set(providedAddresses)];
-
-    if (uniqueProvided.length > MAX_WALLET_ADDRESSES) {
-      throw new ValidationError("Maximum 50 wallet addresses allowed");
-    }
+    const uniqueProvided = prepareWalletAddresses(providedAddresses);
 
     const walletAddresses = mergeIdentified(
       uniqueProvided,
@@ -249,29 +210,13 @@ export default class Specify {
       return null;
     }
 
-    try {
-      const response = await fetch(SERVE_URL, {
-        body: JSON.stringify({
-          adUnitId: options.adUnitId,
-          cookieConsent: this.cookieConsent,
-          imageFormat: options.imageFormat,
-          walletAddresses,
-        }),
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.publisherKey,
-        },
-        method: "POST",
-      });
-
-      if (response.status !== 200) {
-        return null;
-      }
-
-      return await response.json();
-    } catch {
-      return null;
-    }
+    return await requestAd({
+      adUnitId: options.adUnitId,
+      cookieConsent: this.cookieConsent,
+      credentials: "include",
+      imageFormat: options.imageFormat,
+      publisherKey: this.publisherKey,
+      walletAddresses,
+    });
   }
 }

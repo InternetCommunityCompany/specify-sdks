@@ -1,0 +1,272 @@
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+
+const scratch = mkdtempSync(join(tmpdir(), "specify-packages-"));
+const archivesDirectory = join(scratch, "archives");
+const packagesDirectory = join(scratch, "packages");
+
+interface PackageManifest {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  exports?: unknown;
+  main?: string;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
+  types?: string;
+  version?: string;
+}
+
+interface PackedPackage {
+  directory: string;
+  files: string[];
+  manifest: PackageManifest;
+  tarball: string;
+}
+
+function packageFiles(tarball: string): string[] {
+  return execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" })
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+}
+
+function packPackage(
+  packagePath: string,
+  directoryName: string
+): PackedPackage {
+  const packedPath = execFileSync(
+    "bun",
+    ["pm", "pack", "--destination", archivesDirectory, "--quiet"],
+    { cwd: packagePath, encoding: "utf8" }
+  ).trim();
+  const tarball = isAbsolute(packedPath)
+    ? packedPath
+    : resolve(packagePath, packedPath);
+  const directory = join(packagesDirectory, directoryName);
+  mkdirSync(directory, { recursive: true });
+  execFileSync(
+    "tar",
+    ["-xzf", tarball, "--strip-components=1", "-C", directory],
+    { stdio: "inherit" }
+  );
+  const files = packageFiles(tarball);
+  const manifest: PackageManifest = JSON.parse(
+    readFileSync(join(directory, "package.json"), "utf8")
+  );
+  console.log(`${directoryName} tarball files:\n${files.join("\n")}`);
+  return { directory, files, manifest, tarball };
+}
+
+function requireFile(files: string[], path: string): void {
+  if (!files.includes(`package/${path}`)) {
+    throw new Error(`Packed package is missing ${path}`);
+  }
+}
+
+try {
+  mkdirSync(archivesDirectory, { recursive: true });
+  mkdirSync(packagesDirectory, { recursive: true });
+
+  const core = packPackage("packages/core", "core");
+  const publisher = packPackage("packages/publisher-sdk", "publisher-sdk");
+
+  requireFile(core.files, "dist/index.js");
+  requireFile(core.files, "dist/index.js.map");
+  requireFile(core.files, "dist/index.d.ts");
+  requireFile(core.files, "dist/index.d.ts.map");
+  if (core.files.some((path) => path.startsWith("package/src/"))) {
+    throw new Error("Core tarball must not contain source files");
+  }
+  if (
+    core.manifest.main !== "dist/index.js" ||
+    core.manifest.types !== "dist/index.d.ts" ||
+    JSON.stringify(core.manifest.exports).includes("/src/")
+  ) {
+    throw new Error(
+      "Core manifest must expose built JavaScript and declarations"
+    );
+  }
+  console.log("Verified @specify-sh/core exposes built artifacts only");
+
+  const coreDependency = publisher.manifest.dependencies?.["@specify-sh/core"];
+  if (!coreDependency || coreDependency !== core.manifest.version) {
+    throw new Error(
+      `Publisher must depend on the packed core version, found ${coreDependency ?? "nothing"}`
+    );
+  }
+  for (const dependencies of [
+    publisher.manifest.devDependencies,
+    publisher.manifest.peerDependencies,
+    publisher.manifest.optionalDependencies,
+  ]) {
+    if (dependencies?.["@specify-sh/core"]) {
+      throw new Error(
+        "Publisher must declare @specify-sh/core only in dependencies"
+      );
+    }
+  }
+  if (
+    publisher.manifest.scripts?.prepack ||
+    publisher.manifest.scripts?.postpack
+  ) {
+    throw new Error("Publisher must not mutate its manifest in pack scripts");
+  }
+  if (publisher.files.some((path) => path.startsWith("package/dist/_core/"))) {
+    throw new Error("Publisher tarball must not contain dist/_core");
+  }
+  console.log(
+    `Verified publisher dependency on @specify-sh/core@${coreDependency}`
+  );
+
+  for (const file of ["index.js", "server.js", "index.d.ts", "server.d.ts"]) {
+    const path = join(publisher.directory, "dist", file);
+    if (!readFileSync(path, "utf8").includes("@specify-sh/core")) {
+      throw new Error(`${file} must retain its @specify-sh/core import`);
+    }
+  }
+  const reactServer = readFileSync(
+    join(publisher.directory, "dist", "react-server.js"),
+    "utf8"
+  );
+  if (reactServer.includes("@specify-sh/core")) {
+    throw new Error("The react-server guard must not import core");
+  }
+  console.log("Verified publisher JavaScript and declarations import core");
+
+  const consumerDirectory = join(scratch, "consumer");
+  mkdirSync(consumerDirectory, { recursive: true });
+  writeFileSync(
+    join(consumerDirectory, "package.json"),
+    JSON.stringify({
+      dependencies: {
+        "@specify-sh/core": `file:${core.tarball}`,
+        "@specify-sh/publisher-sdk": `file:${publisher.tarball}`,
+      },
+      overrides: {
+        "@specify-sh/core": `file:${core.tarball}`,
+      },
+      private: true,
+      type: "module",
+    })
+  );
+  execFileSync("bun", ["install", "--ignore-scripts"], {
+    cwd: consumerDirectory,
+    stdio: "inherit",
+  });
+  console.log("Installed both local tarballs into an empty consumer");
+
+  writeFileSync(
+    join(consumerDirectory, "consumer.ts"),
+    `import { type AdRequest, type Address as CoreAddress, assertValidAddresses, assertValidPublisherKey, ImageFormat as CoreImageFormat, type ImageFormat as CoreImageFormatType, MAX_WALLET_ADDRESSES, prepareWalletAddresses, requestAd, type SpecifyAd as CoreSpecifyAd, ValidationError as CoreValidationError, type ValidationError as CoreValidationErrorType } from "@specify-sh/core";
+import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
+import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
+const coreAddress: CoreAddress = "0x1234567890123456789012345678901234567890";
+const coreImageFormat: CoreImageFormatType = CoreImageFormat.LANDSCAPE;
+const coreRequest: AdRequest = { imageFormat: coreImageFormat, publisherKey: "spk_1234567890abcdef1234567890abcd", walletAddresses: [coreAddress] };
+const coreAd: Promise<CoreSpecifyAd | null> = requestAd(coreRequest);
+const coreValidation: CoreValidationErrorType = new CoreValidationError("message");
+assertValidAddresses([coreAddress]);
+assertValidPublisherKey(coreRequest.publisherKey);
+const prepared: CoreAddress[] = prepareWalletAddresses([coreAddress]);
+const cap: number = MAX_WALLET_ADDRESSES;
+const address: Address = coreAddress;
+const config: SpecifyInitConfig = { publisherKey: coreRequest.publisherKey };
+const client: Specify = new Specify(config);
+const imageFormat: ImageFormatType = ImageFormat.LANDSCAPE;
+const ad: Promise<SpecifyAd | null> = client.serve(address, { imageFormat });
+const serverAddress: ServerAddress = address;
+const serverImageFormat: ServerImageFormatType = ServerImageFormat.LANDSCAPE;
+const serverOptions: ServeOptions = { publisherKey: config.publisherKey, walletAddresses: [serverAddress], imageFormat: serverImageFormat };
+const serverAd: Promise<ServerSpecifyAd | null> = serve(serverOptions);
+function validationMessage(error: unknown): string {
+  if (error instanceof ValidationError) {
+    const validation: ValidationError = error;
+    return validation.message;
+  }
+  return "";
+}
+function serverValidationMessage(error: unknown): string {
+  if (error instanceof ServerValidationError) {
+    const validation: ServerValidationErrorType = error;
+    return validation.message;
+  }
+  return "";
+}
+void coreAd;
+void coreValidation;
+void prepared;
+void cap;
+void ad;
+void serverAd;
+void validationMessage;
+void serverValidationMessage;
+`
+  );
+  writeFileSync(
+    join(consumerDirectory, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+        types: [],
+      },
+      include: ["consumer.ts"],
+    })
+  );
+  execFileSync(
+    resolve("node_modules/.bin/tsc"),
+    ["--noEmit", "-p", join(consumerDirectory, "tsconfig.json")],
+    { cwd: consumerDirectory, stdio: "inherit" }
+  );
+  console.log("Type-checked direct core, browser, and server imports");
+
+  execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `import * as core from "@specify-sh/core";
+import Specify, * as browser from "@specify-sh/publisher-sdk";
+import * as server from "@specify-sh/publisher-sdk/server";
+const sameKeys = (actual, expected) => JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(expected);
+if (!sameKeys(core, ["ImageFormat", "MAX_WALLET_ADDRESSES", "ValidationError", "assertValidAddresses", "assertValidPublisherKey", "prepareWalletAddresses", "requestAd"])) process.exit(1);
+if (!sameKeys(browser, ["ImageFormat", "ValidationError", "default"])) process.exit(1);
+if (!sameKeys(server, ["ImageFormat", "ValidationError", "serve"])) process.exit(1);
+if (typeof Specify !== "function" || typeof server.serve !== "function") process.exit(1);
+if (browser.ImageFormat !== core.ImageFormat || server.ImageFormat !== core.ImageFormat) process.exit(1);
+if (browser.ValidationError !== core.ValidationError || server.ValidationError !== core.ValidationError) process.exit(1);`,
+    ],
+    { cwd: consumerDirectory, stdio: "inherit" }
+  );
+  console.log("Verified runtime exports and shared core identity");
+
+  const guardMessage = execFileSync(
+    "node",
+    [
+      "--conditions=react-server",
+      "-e",
+      'import("@specify-sh/publisher-sdk").then(() => process.exit(1)).catch((error) => { console.log(error.message); })',
+    ],
+    { cwd: consumerDirectory, encoding: "utf8" }
+  ).trim();
+  if (
+    guardMessage !==
+    '@specify-sh/publisher-sdk cannot be imported from a React Server Component. Import { serve } from "@specify-sh/publisher-sdk/server" instead.'
+  ) {
+    throw new Error(`Unexpected react-server guard: ${guardMessage}`);
+  }
+  console.log("Verified default and react-server conditional resolution");
+} finally {
+  rmSync(scratch, { force: true, recursive: true });
+}

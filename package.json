@@ -10,7 +10,8 @@
     "check": "ultracite check",
     "check:fix": "ultracite fix",
     "test": "vitest run",
-    "types": "turbo run types"
+    "types": "turbo run types",
+    "verify:package": "bun run scripts/verify-package.mts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
