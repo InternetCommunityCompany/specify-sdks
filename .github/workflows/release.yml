@@ -44,6 +44,9 @@ jobs:
         uses: changesets/action@v1
         with:
           publish: bunx changeset publish
-          version: bunx changeset version
+          # `bun install` so the version PR carries a lockfile matching the
+          # manifests it just rewrote — the release job runs
+          # `--frozen-lockfile` against exactly that commit.
+          version: bunx changeset version && bun install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

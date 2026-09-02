@@ -41,7 +41,7 @@
     "types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@specify-sh/core": "workspace:*"
+    "@specify-sh/core": "0.0.0"
   },
   "publishConfig": {
     "access": "public"
