@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 const scratch = mkdtempSync(join(tmpdir(), "specify-packages-"));
 const archivesDirectory = join(scratch, "archives");
@@ -44,14 +44,17 @@ function packPackage(
   packagePath: string,
   directoryName: string
 ): PackedPackage {
+  // npm, not bun: `changeset publish` shells out to `npm publish`, and the
+  // two packers disagree — bun rewrites a `workspace:` range to the real
+  // version and npm ships it verbatim, which would publish an unresolvable
+  // dependency. Verifying bun's tarball would not see that.
   const packedPath = execFileSync(
-    "bun",
-    ["pm", "pack", "--destination", archivesDirectory, "--quiet"],
+    "npm",
+    ["pack", "--pack-destination", archivesDirectory, "--silent"],
     { cwd: packagePath, encoding: "utf8" }
   ).trim();
-  const tarball = isAbsolute(packedPath)
-    ? packedPath
-    : resolve(packagePath, packedPath);
+  // npm prints the bare filename, not a path.
+  const tarball = resolve(archivesDirectory, basename(packedPath));
   const directory = join(packagesDirectory, directoryName);
   mkdirSync(directory, { recursive: true });
   execFileSync(
