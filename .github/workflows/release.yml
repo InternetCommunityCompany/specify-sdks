@@ -18,8 +18,28 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
+      # `changeset publish` shells out to `npm publish` for anything that is
+      # not pnpm or yarn, and npm's trusted publishing has floors of its own:
+      # npm 11.5.1 and Node 22.14. Node 22 ships npm 10, hence the upgrade.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Upgrade npm
+        run: npm install --global npm@latest
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      # Both packages declare `files: ["dist"]` and neither has a prepack
+      # script, so without this the tarballs ship a manifest pointing at
+      # nothing. `verify:package` packs them and fails if dist is missing.
+      - name: Build
+        run: bun run build
+      - name: Verify package
+        run: bun run verify:package
+      # No NPM_TOKEN: npm exchanges the workflow's OIDC token for a
+      # short-lived one, which is also what mints provenance. Registering a
+      # trusted publisher on npmjs.com pins this filename, so renaming this
+      # file breaks publishing until the registration is updated to match.
       - name: Create release pull request or publish
         uses: changesets/action@v1
         with:
@@ -27,5 +47,3 @@ jobs:
           version: bunx changeset version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
