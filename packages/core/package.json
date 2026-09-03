@@ -1,6 +1,6 @@
 {
   "name": "@specify-sh/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Shared implementation for Specify SDK packages",
   "homepage": "https://github.com/InternetCommunityCompany/specify-sdks#readme",
   "bugs": "https://github.com/InternetCommunityCompany/specify-sdks/issues",

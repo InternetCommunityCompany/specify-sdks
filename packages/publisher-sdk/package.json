@@ -1,6 +1,6 @@
 {
   "name": "@specify-sh/publisher-sdk",
-  "version": "0.4.2",
+  "version": "1.0.0",
   "description": "JS SDK for Specify Publishers",
   "keywords": [
     "specify",
@@ -41,7 +41,7 @@
     "types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@specify-sh/core": "0.0.0"
+    "@specify-sh/core": "0.1.0"
   },
   "publishConfig": {
     "access": "public"
