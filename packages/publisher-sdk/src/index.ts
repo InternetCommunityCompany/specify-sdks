@@ -184,19 +184,15 @@ export default class Specify {
   }
 
   /**
-   * Registers a listener for identity changes that improve the next serve()
+   * Registers a listener for when a later serve() could do better
    *
-   * The listener runs when a later serve() would send something better than
-   * the last one would have: a wallet address newly registered through
-   * identify(), or cookie consent newly granted through
-   * setCookieConsent(true). A consent withdrawal and the eviction of old
-   * addresses past the 50-address cap do not fire it. Several changes in the
-   * same tick coalesce into one call, delivered in a microtask after the
-   * change. A listener that throws is swallowed and does not affect other
-   * listeners. Outside a browser, such as during a server render, this does
-   * nothing and still returns a callable unsubscribe.
+   * Runs when identify() adds an address that was not already registered, or
+   * setCookieConsent(true) grants consent. Withdrawing consent does not run
+   * it. Several changes in the same tick arrive as a single call, shortly
+   * after the change rather than during it. Does nothing outside a browser,
+   * such as during a server render.
    *
-   * @param listener - Called with no arguments when the identity improved
+   * @param listener - Called when the identity improved
    * @returns A function that detaches the listener; safe to call twice
    */
   onIdentityChange(listener: () => void): () => void {
