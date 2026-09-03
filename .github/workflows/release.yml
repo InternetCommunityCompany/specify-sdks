@@ -44,9 +44,12 @@ jobs:
         uses: changesets/action@v1
         with:
           publish: bunx changeset publish
-          # `bun install` so the version PR carries a lockfile matching the
-          # manifests it just rewrote — the release job runs
+          # A script, not a compound command: this input is split into argv
+          # rather than run through a shell, so an `&&` here reaches
+          # `changeset version` as an argument and it exits 1. The script runs
+          # `bun install` after versioning so the release PR carries a lockfile
+          # matching the manifests it just rewrote — the release job runs
           # `--frozen-lockfile` against exactly that commit.
-          version: bunx changeset version && bun install
+          version: bun run ci:version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

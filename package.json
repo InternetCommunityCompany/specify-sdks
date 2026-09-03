@@ -9,6 +9,7 @@
     "build": "turbo run build",
     "check": "ultracite check",
     "check:fix": "ultracite fix",
+    "ci:version": "changeset version && bun install",
     "test": "vitest run",
     "types": "turbo run types",
     "verify:package": "bun run scripts/verify-package.mts"
