@@ -95,11 +95,11 @@ export default class Specify {
   private identityFlushScheduled = false;
 
   /**
-   * Creates a new Specify client instance
+   * Creates a Specify client
    *
-   * @param config - SDK configuration object
-   * @param config.publisherKey - Publisher key used for authentication
-   * @throws {ValidationError} When publisher key format is invalid
+   * @param config - Client configuration
+   * @param config.publisherKey - Your publisher key, which starts with spk_
+   * @throws {ValidationError} When the publisher key is malformed
    */
   constructor(config: SpecifyInitConfig) {
     assertValidPublisherKey(config.publisherKey);
@@ -107,17 +107,15 @@ export default class Specify {
   }
 
   /**
-   * Updates the consent signal for Specify's identity cookie
+   * Sets whether the user consented to Specify's identity cookie
    *
-   * Call this when your consent management platform reports a change, so the
-   * next serve() call reflects it without a page reload. Consent starts false
-   * on a new instance, so this is the only way it ever becomes true. Does
-   * nothing outside a browser, such as during a server render. The value is
-   * never persisted: the publisher's CMP is the source of truth and it is
-   * read from the instance on each serve().
+   * Call it whenever your consent platform reports a change, and the next
+   * serve() uses the new value without a page reload. Consent starts false,
+   * and this is the only way to grant it. The SDK never stores it, so set it
+   * again on each page load. Does nothing outside a browser, such as during a
+   * server render.
    *
-   * @param granted - Whether the user consented to Specify's identity cookie
-   * @returns Nothing
+   * @param granted - Whether the user consented
    */
   setCookieConsent(granted: boolean): void {
     if (typeof window === "undefined") {
@@ -131,31 +129,24 @@ export default class Specify {
   }
 
   /**
-   * Returns the current consent signal
+   * Reports whether consent has been granted on this client
    *
-   * Returns false until setCookieConsent(true) grants it. Outside a browser,
-   * such as during a server render, it is always false because the setter
-   * does nothing there.
-   *
-   * @returns The current consent value
+   * @returns True once setCookieConsent(true) has run in a browser
    */
   hasCookieConsent(): boolean {
     return this.cookieConsent;
   }
 
   /**
-   * Registers wallet address(es) to send on every later serve()
+   * Registers wallet addresses to include in every later serve()
    *
-   * Call this when the user connects a wallet. Registered addresses ride
-   * along on every serve() in either form, merged after any addresses the
-   * caller passes there, and the SDK sends at most 50 addresses in total.
-   * Registration merges and never removes: several wallets can be one
-   * person, and a disconnect does not retract one. Does nothing outside a
-   * browser, such as during a server render.
+   * Call it when the user connects a wallet. Registering merges and never
+   * removes, so a disconnect does not retract an address, and the 50 most
+   * recently registered are kept. Does nothing outside a browser, such as
+   * during a server render.
    *
-   * @param addressOrAddresses - Single wallet address, array of wallet addresses, an empty array, or undefined
-   * @returns Nothing
-   * @throws {ValidationError} When any wallet address in the batch is malformed; nothing from that call is registered
+   * @param addressOrAddresses - One address, an array of them, or nothing
+   * @throws {ValidationError} In a browser, when any address in the batch is malformed. Nothing from that call is registered.
    */
   identify(addressOrAddresses: Address | Address[] | undefined | null): void {
     if (typeof window === "undefined") {
@@ -231,29 +222,28 @@ export default class Specify {
   }
 
   /**
-   * Serves content using the wallets registered through identify() and the
-   * consent signal, without passing addresses at the call site
+   * Serves an ad using the addresses registered through identify() and the
+   * current consent
    *
-   * @param options - Configuration options containing imageFormat and optional adUnitId
-   * @param options.imageFormat - The desired image format for the ad
-   * @param options.adUnitId - arbitrary string id to identify where the ad is being displayed
-   * @throws {ValidationError} When called with no arguments at all
-   * @returns Ad content on a 200 response, or null for no-fill, API failure, or network failure
+   * @param options - How to serve this placement
+   * @param options.imageFormat - The image format to request
+   * @param options.adUnitId - Your own id for this placement, so you can compare placements in reporting
+   * @throws {ValidationError} When called with no arguments
+   * @returns An ad, or null for no ad, an API failure, or a network failure
    */
   serve(options: ServeOptions): Promise<SpecifyAd | null>;
   /**
-   * Serves content to the specified wallet address(es)
+   * Serves an ad to the given wallet address or addresses
    *
-   * Addresses passed here take priority over the ones registered through
-   * identify(): they are sent first, and the SDK sends at most 50 addresses
-   * in total.
+   * These go out ahead of anything registered through identify(), and at most
+   * 50 addresses are sent in total.
    *
-   * @param addressOrAddresses - Single wallet address, array of wallet addresses, an empty array, or undefined
-   * @param options - Configuration options containing imageFormat and optional adUnitId
-   * @param options.imageFormat - The desired image format for the ad
-   * @param options.adUnitId - arbitrary string id to identify where the ad is being displayed
-   * @throws {ValidationError} When a wallet address is malformed or more than 50 unique addresses are provided
-   * @returns Ad content on a 200 response, or null for no-fill, API failure, or network failure
+   * @param addressOrAddresses - One address, an array of them, or nothing to rely on identify() and consent alone
+   * @param options - How to serve this placement
+   * @param options.imageFormat - The image format to request
+   * @param options.adUnitId - Your own id for this placement, so you can compare placements in reporting
+   * @throws {ValidationError} When an address is malformed, or more than 50 are passed here
+   * @returns An ad, or null for no ad, an API failure, or a network failure
    */
   serve(
     addressOrAddresses: Address | Address[] | undefined | null,
