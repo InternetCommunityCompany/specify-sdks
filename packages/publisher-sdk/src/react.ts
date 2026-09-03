@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import type Specify from "./index";
 import type { Address, ImageFormat, SpecifyAd } from "./index";
 
-/** Options for a hook-driven ad slot */
+/** Options for useSpecifyAd() */
 export interface UseSpecifyAdOptions {
   /** Your own id for this placement, so you can compare placements in reporting */
   adUnitId?: string;
   /** The image format to request */
   imageFormat: ImageFormat;
-  /** The Specify client to serve through; create it once outside your components and pass the same instance on every render */
+  /** The Specify client to serve through. Create it once and reuse the same instance on every render. */
   specify: Specify;
 }
 
@@ -44,30 +44,22 @@ function toWalletAddresses(walletKey: string): Address[] {
 }
 
 /**
- * Serves an ad into a Client Component using the addresses registered through
- * identify() and the current consent
+ * Fills an ad slot in a Client Component, using identify() and the current consent
  *
- * Serves once on mount, and serves again when the client's identity improves,
- * such as when identify() registers a new wallet. The first ad to arrive is
- * kept for the life of the component, so a filled slot never swaps or goes
- * blank under the reader.
+ * The first ad to arrive fills the slot for good — it won't swap or clear later.
  *
- * @param options - How to serve this placement, including the Specify client
- * @returns The ad for this slot, or null while empty; it stays null for a no-fill, an API failure, or a network failure
+ * @param options - The Specify client and how to serve this placement
+ * @returns The ad for this slot, or null while it's empty
  */
 export function useSpecifyAd(options: UseSpecifyAdOptions): SpecifyAd | null;
 /**
- * Serves an ad into a Client Component for the given wallet address or
- * addresses
+ * Fills an ad slot in a Client Component for the given wallet address or addresses
  *
- * These go out ahead of anything registered through identify(), and at most
- * 50 addresses are sent in total. The addresses only matter while the slot is
- * still empty, and a fresh array with the same addresses does not serve
- * again, so an inline array literal is safe.
+ * The wallets only matter for the first serve; once the slot fills, later renders ignore them.
  *
  * @param addressOrAddresses - One address, an array of them, or nothing to rely on identify() and consent alone
- * @param options - How to serve this placement, including the Specify client
- * @returns The ad for this slot, or null while empty; it stays null for a no-fill, an API failure, or a network failure
+ * @param options - The Specify client and how to serve this placement
+ * @returns The ad for this slot, or null while it's empty
  */
 export function useSpecifyAd(
   addressOrAddresses: Address | Address[] | undefined | null,
