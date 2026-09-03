@@ -187,6 +187,10 @@ const config: SpecifyInitConfig = { publisherKey: coreRequest.publisherKey };
 const client: Specify = new Specify(config);
 const imageFormat: ImageFormatType = ImageFormat.LANDSCAPE;
 const ad: Promise<SpecifyAd | null> = client.serve(address, { imageFormat });
+const unsubscribeIdentity: () => void = client.onIdentityChange(() => {
+  /* re-serve */
+});
+unsubscribeIdentity();
 const serverAddress: ServerAddress = address;
 const serverImageFormat: ServerImageFormatType = ServerImageFormat.LANDSCAPE;
 const serverOptions: ServeOptions = { publisherKey: config.publisherKey, walletAddresses: [serverAddress], imageFormat: serverImageFormat };
@@ -210,6 +214,7 @@ void coreValidation;
 void prepared;
 void cap;
 void ad;
+void unsubscribeIdentity;
 void serverAd;
 void validationMessage;
 void serverValidationMessage;

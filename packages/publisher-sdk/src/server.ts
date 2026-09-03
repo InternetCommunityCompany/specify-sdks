@@ -16,27 +16,24 @@ export type ValidationError = CoreValidationError;
 export const ImageFormat = CoreImageFormat;
 export const ValidationError: typeof CoreValidationError = CoreValidationError;
 
-/**
- * Configuration for a server-side ad request.
- *
- * @param publisherKey - Publisher key used for authentication
- * @param walletAddresses - One or more wallet addresses used for matching
- * @param imageFormat - The desired image format for the ad
- * @param adUnitId - Optional identifier for where the ad is displayed
- */
+/** Options for a server-side ad request */
 export interface ServeOptions {
+  /** Your own id for this placement, so you can compare placements in reporting */
   adUnitId?: string;
+  /** The image format to request */
   imageFormat: ImageFormat;
+  /** Your publisher key, which starts with spk_ */
   publisherKey: string;
+  /** One or more wallet addresses to match against */
   walletAddresses: Address[];
 }
 
 /**
- * Serves an ad from a server using the provided wallet addresses.
+ * Serves an ad from a server
  *
- * @param options - Publisher key, wallet addresses, image format, and optional ad unit identifier
- * @returns Ad content on a 200 response, or null for no-fill, API failure, or network failure
- * @throws {ValidationError} When the publisher key or wallet addresses are invalid, the address list is empty, or more than 50 unique addresses are provided
+ * @param options - Publisher key, wallet addresses, image format, and an optional ad unit id
+ * @returns An ad, or null for no ad, an API failure, or a network failure
+ * @throws {ValidationError} When the publisher key or an address is malformed, no addresses are given, or more than 50 are
  */
 export async function serve(options: ServeOptions): Promise<SpecifyAd | null> {
   assertValidPublisherKey(options.publisherKey);
