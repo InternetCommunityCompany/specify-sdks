@@ -498,6 +498,302 @@ describe("Specify", () => {
     });
   });
 
+  describe("onIdentityChange", () => {
+    describe.runIf(typeof window !== "undefined")("browser", () => {
+      it("calls the listener once for a fresh consent grant, not synchronously", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.onIdentityChange(listener);
+        specify.setCookieConsent(true);
+        expect(listener).not.toHaveBeenCalled();
+        await Promise.resolve();
+
+        expect(listener).toHaveBeenCalledExactlyOnceWith();
+      });
+
+      it("calls the listener once when consent is granted twice in a row", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.onIdentityChange(listener);
+        specify.setCookieConsent(true);
+        specify.setCookieConsent(true);
+        await Promise.resolve();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not call the listener when consent is withdrawn", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.setCookieConsent(true);
+        specify.onIdentityChange(listener);
+        specify.setCookieConsent(false);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it("calls the listener once for a new address", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.onIdentityChange(listener);
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not call the listener for an already-registered address, and a later serve() still carries it", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+        const { requests } = setupMockFetch(mockAd);
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+        specify.onIdentityChange(listener);
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+        await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
+
+        expect(listener).not.toHaveBeenCalled();
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        });
+      });
+
+      it("coalesces three identify() calls into one callback, and a fourth in a later tick into a second", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+        const addresses = ["aa", "bb", "cc"].map(
+          (hex) => `0x${hex.repeat(20)}` as Address
+        );
+
+        specify.onIdentityChange(listener);
+        for (const address of addresses) {
+          specify.identify(address);
+        }
+        await Promise.resolve();
+        expect(listener).toHaveBeenCalledTimes(1);
+
+        specify.identify(`0x${"dd".repeat(20)}` as Address);
+        await Promise.resolve();
+        expect(listener).toHaveBeenCalledTimes(2);
+      });
+
+      it("coalesces a new address and a consent grant in the same tick into one callback", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.onIdentityChange(listener);
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        specify.setCookieConsent(true);
+        await Promise.resolve();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
+
+      it("produces no callback for a batch containing a malformed address", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.onIdentityChange(listener);
+        expect(() =>
+          specify.identify([
+            VALID_MOCK_WALLET_ADDRESS,
+            "not-an-address" as Address,
+          ])
+        ).toThrow(ValidationError);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it("produces no callback for an empty batch", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.onIdentityChange(listener);
+        specify.identify([]);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it("notifies two listeners, and unsubscribing one leaves the other firing", async () => {
+        const specify = createSpecify();
+        const first = vi.fn();
+        const second = vi.fn();
+
+        const unsubscribeFirst = specify.onIdentityChange(first);
+        specify.onIdentityChange(second);
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+        expect(first).toHaveBeenCalledTimes(1);
+        expect(second).toHaveBeenCalledTimes(1);
+
+        unsubscribeFirst();
+        specify.identify(`0x${"ee".repeat(20)}` as Address);
+        await Promise.resolve();
+        expect(first).toHaveBeenCalledTimes(1);
+        expect(second).toHaveBeenCalledTimes(2);
+      });
+
+      it("treats the same function registered twice as two subscriptions", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        const firstUnsubscribe = specify.onIdentityChange(listener);
+        specify.onIdentityChange(listener);
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+        expect(listener).toHaveBeenCalledTimes(2);
+
+        firstUnsubscribe();
+        specify.identify(`0x${"ee".repeat(20)}` as Address);
+        await Promise.resolve();
+        expect(listener).toHaveBeenCalledTimes(3);
+      });
+
+      it("detaches on unsubscribe, and calling the unsubscribe twice does not throw", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        const unsubscribe = specify.onIdentityChange(listener);
+        unsubscribe();
+        unsubscribe();
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it("does not call a listener unsubscribed during a flush by another listener", async () => {
+        const specify = createSpecify();
+        const late = vi.fn();
+        let detachLate: (() => void) | undefined;
+
+        specify.onIdentityChange(() => {
+          detachLate?.();
+        });
+        detachLate = specify.onIdentityChange(late);
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await Promise.resolve();
+
+        expect(late).not.toHaveBeenCalled();
+      });
+
+      it("swallows a throwing listener without stopping other or later notifications", async () => {
+        const specify = createSpecify();
+        const afterThrower = vi.fn();
+        const otherAddress = `0x${"ee".repeat(20)}` as Address;
+
+        specify.onIdentityChange(() => {
+          throw new Error("listener error");
+        });
+        specify.onIdentityChange(afterThrower);
+
+        expect(() => specify.identify(VALID_MOCK_WALLET_ADDRESS)).not.toThrow();
+        await Promise.resolve();
+        expect(afterThrower).toHaveBeenCalledTimes(1);
+
+        specify.identify(otherAddress);
+        await Promise.resolve();
+        expect(afterThrower).toHaveBeenCalledTimes(2);
+      });
+
+      it("fires once for a 51st address evicting the oldest, and the next serve() carries 50 without it", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+        const { requests } = setupMockFetch(mockAd);
+        const addresses = Array.from(
+          { length: 50 },
+          (_, index) => `0x${index.toString(16).padStart(40, "0")}` as Address
+        );
+
+        specify.identify(addresses);
+        await Promise.resolve();
+        expect(listener).not.toHaveBeenCalled();
+
+        specify.onIdentityChange(listener);
+        const fiftyFirst = `0x${"ff".repeat(20)}` as Address;
+        specify.identify(fiftyFirst);
+        await Promise.resolve();
+        expect(listener).toHaveBeenCalledTimes(1);
+
+        await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
+        const sent = requestBody(requests[0] ?? {}) as {
+          walletAddresses: Address[];
+        };
+        expect(sent.walletAddresses).toHaveLength(50);
+        expect(sent.walletAddresses).not.toContain(addresses[0]);
+        expect(sent.walletAddresses).toContain(fiftyFirst);
+      });
+
+      it("does not fire for a re-identification at the 50-address cap", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+        const addresses = Array.from(
+          { length: 50 },
+          (_, index) => `0x${index.toString(16).padStart(40, "0")}` as Address
+        );
+
+        specify.identify(addresses);
+        await Promise.resolve();
+        specify.onIdentityChange(listener);
+
+        specify.identify(addresses[25] as Address);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it("does not replay a change to a subscriber added later in the same tick", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        specify.onIdentityChange(listener);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+    });
+
+    describe.runIf(typeof window === "undefined")("node", () => {
+      it("returns an unsubscribe function and never calls the listener", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+
+        const unsubscribe = specify.onIdentityChange(listener);
+        expect(unsubscribe).toBeTypeOf("function");
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        specify.setCookieConsent(true);
+        await Promise.resolve();
+
+        expect(listener).not.toHaveBeenCalled();
+      });
+
+      it("does not throw when the unsubscribe is called once or twice", () => {
+        const specify = createSpecify();
+
+        const unsubscribe = specify.onIdentityChange(() => {
+          /* never called without a browser */
+        });
+        expect(() => unsubscribe()).not.toThrow();
+        expect(() => unsubscribe()).not.toThrow();
+      });
+    });
+  });
+
   describe("setCookieConsent", () => {
     describe.runIf(typeof window !== "undefined")("browser", () => {
       it("updates what the next serve() sends", async () => {

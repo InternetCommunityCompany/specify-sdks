@@ -27,6 +27,10 @@ export interface SpecifyInitConfig {
   publisherKey: string;
 }
 
+interface IdentitySubscription {
+  listener: () => void;
+}
+
 function toAddressArray(
   addressOrAddresses: Address | Address[] | undefined | null
 ): Address[] {
@@ -86,6 +90,10 @@ export default class Specify {
 
   private readonly identifiedAddresses = new Set<Address>();
 
+  private readonly identitySubscriptions = new Set<IdentitySubscription>();
+
+  private identityFlushScheduled = false;
+
   /**
    * Creates a new Specify client instance
    *
@@ -115,7 +123,11 @@ export default class Specify {
     if (typeof window === "undefined") {
       return;
     }
+    const gainedConsent = granted && !this.cookieConsent;
     this.cookieConsent = granted;
+    if (gainedConsent) {
+      this.scheduleIdentityChange();
+    }
   }
 
   /**
@@ -151,7 +163,11 @@ export default class Specify {
     }
     const addresses = toAddressArray(addressOrAddresses);
     assertValidAddresses(addresses);
+    let gainedAddress = false;
     for (const address of addresses) {
+      if (!this.identifiedAddresses.has(address)) {
+        gainedAddress = true;
+      }
       this.identifiedAddresses.delete(address);
       this.identifiedAddresses.add(address);
     }
@@ -161,6 +177,60 @@ export default class Specify {
         break;
       }
       this.identifiedAddresses.delete(oldest);
+    }
+    if (gainedAddress) {
+      this.scheduleIdentityChange();
+    }
+  }
+
+  /**
+   * Registers a listener for identity changes that improve the next serve()
+   *
+   * The listener runs when a later serve() would send something better than
+   * the last one would have: a wallet address newly registered through
+   * identify(), or cookie consent newly granted through
+   * setCookieConsent(true). A consent withdrawal and the eviction of old
+   * addresses past the 50-address cap do not fire it. Several changes in the
+   * same tick coalesce into one call, delivered in a microtask after the
+   * change. A listener that throws is swallowed and does not affect other
+   * listeners. Outside a browser, such as during a server render, this does
+   * nothing and still returns a callable unsubscribe.
+   *
+   * @param listener - Called with no arguments when the identity improved
+   * @returns A function that detaches the listener; safe to call twice
+   */
+  onIdentityChange(listener: () => void): () => void {
+    if (typeof window === "undefined") {
+      return () => {
+        /* nothing to detach outside a browser */
+      };
+    }
+    const subscription: IdentitySubscription = { listener };
+    this.identitySubscriptions.add(subscription);
+    return () => {
+      this.identitySubscriptions.delete(subscription);
+    };
+  }
+
+  private scheduleIdentityChange(): void {
+    if (this.identityFlushScheduled || this.identitySubscriptions.size === 0) {
+      return;
+    }
+    this.identityFlushScheduled = true;
+    queueMicrotask(() => this.flushIdentityChange());
+  }
+
+  private flushIdentityChange(): void {
+    this.identityFlushScheduled = false;
+    for (const subscription of [...this.identitySubscriptions]) {
+      if (!this.identitySubscriptions.has(subscription)) {
+        continue;
+      }
+      try {
+        subscription.listener();
+      } catch {
+        // A misbehaving listener must not break the host page or the others.
+      }
     }
   }
 
