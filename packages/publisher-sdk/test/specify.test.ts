@@ -765,6 +765,53 @@ describe("Specify", () => {
 
         expect(listener).not.toHaveBeenCalled();
       });
+
+      it("fires for a case variant of an already-registered address", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn();
+        const lower = `0x${"ab".repeat(20)}` as Address;
+        const upper = `0x${"AB".repeat(20)}` as Address;
+
+        specify.identify(lower);
+        await Promise.resolve();
+        specify.onIdentityChange(listener);
+        specify.identify(upper);
+        await Promise.resolve();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
+
+      it("notifies once more when a listener registers a new address during the flush", async () => {
+        const specify = createSpecify();
+        const calls: number[] = [];
+        let count = 0;
+
+        specify.onIdentityChange(() => {
+          count += 1;
+          calls.push(count);
+          if (count === 1) {
+            specify.identify(`0x${"ab".repeat(20)}` as Address);
+          }
+        });
+
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(calls).toEqual([1, 2]);
+      });
+
+      it("does not loop when a listener re-identifies an address already registered", async () => {
+        const specify = createSpecify();
+        const listener = vi.fn(() => {
+          specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        });
+
+        specify.onIdentityChange(listener);
+        specify.identify(VALID_MOCK_WALLET_ADDRESS);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
     });
 
     describe.runIf(typeof window === "undefined")("node", () => {
