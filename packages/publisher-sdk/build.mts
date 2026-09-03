@@ -16,7 +16,12 @@ execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", {
 console.log("Building with Bun...");
 await build({
   drop: ["debugger"], // remove debugger statements
-  entrypoints: ["./src/index.ts", "./src/server.ts", "./src/react-server.ts"],
+  entrypoints: [
+    "./src/index.ts",
+    "./src/server.ts",
+    "./src/react-server.ts",
+    "./src/react.react-server.ts",
+  ],
   env: "disable",
   external: ["@specify-sh/core"],
   footer: `
@@ -28,6 +33,25 @@ await build({
   sourcemap: "external", // separate .map files instead of inlining
   splitting: false,
   target: "browser", // Changed from "node" to "browser"
+});
+
+// The hook builds separately: minification strips the "use client" directive,
+// so the banner puts it back for the bundlers that need it.
+await build({
+  banner: "'use client'",
+  drop: ["debugger"],
+  entrypoints: ["./src/react.ts"],
+  env: "disable",
+  external: ["@specify-sh/core", "react"],
+  footer: `
+      /* Built with ❤️ by Specify team */
+    `,
+  format: "esm",
+  minify: true,
+  outdir: "./dist",
+  sourcemap: "external",
+  splitting: false,
+  target: "browser",
 });
 
 console.log("✅ Build completed successfully");
