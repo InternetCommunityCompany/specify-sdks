@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { inspectWorkingTree } from "../src/preflight";
+import { inspectWorkingTree, summarizeChanges } from "../src/preflight";
 
 const directories: string[] = [];
 
@@ -21,6 +21,17 @@ function temporaryDirectory(): string {
 
 function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
+}
+
+function committedRepository(): string {
+  const cwd = temporaryDirectory();
+  git(cwd, ["init"]);
+  git(cwd, ["config", "user.email", "wizard@example.com"]);
+  git(cwd, ["config", "user.name", "Specify Wizard"]);
+  writeFileSync(join(cwd, "tracked.txt"), "content");
+  git(cwd, ["add", "tracked.txt"]);
+  git(cwd, ["commit", "-m", "Initial commit"]);
+  return cwd;
 }
 
 describe("inspectWorkingTree", () => {
@@ -52,5 +63,30 @@ describe("inspectWorkingTree", () => {
     await expect(inspectWorkingTree(temporaryDirectory())).resolves.toEqual({
       kind: "not-a-repo",
     });
+  });
+});
+
+describe("summarizeChanges", () => {
+  it("reports edited files and the files the agent created", async () => {
+    const cwd = committedRepository();
+    writeFileSync(join(cwd, "tracked.txt"), "edited");
+    writeFileSync(join(cwd, "specify.ts"), "// client");
+
+    const summary = await summarizeChanges(cwd);
+
+    expect(summary).toContain("tracked.txt");
+    expect(summary).toContain("New files, not yet tracked by Git:\nspecify.ts");
+  });
+
+  it("says so when the agent changed nothing", async () => {
+    await expect(summarizeChanges(committedRepository())).resolves.toBe(
+      "No files changed."
+    );
+  });
+
+  it("stays useful where git cannot run", async () => {
+    await expect(summarizeChanges(temporaryDirectory())).resolves.toContain(
+      "Review the changes with your own tools"
+    );
   });
 });

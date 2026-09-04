@@ -56,11 +56,21 @@ async function runCli(): Promise<number> {
       );
       return 1;
     }
-    return await runWizard({
-      cwd: process.cwd(),
-      ...io,
-      seam: anyAgentSeam(),
-    });
+    // Ctrl-C between prompts reaches us as SIGINT, and the agent turn in
+    // flight has to be told, or its CLI keeps running after the wizard exits.
+    const stopping = new AbortController();
+    const stop = () => stopping.abort();
+    process.on("SIGINT", stop);
+    try {
+      return await runWizard({
+        cwd: process.cwd(),
+        ...io,
+        seam: anyAgentSeam(),
+        signal: stopping.signal,
+      });
+    } finally {
+      process.off("SIGINT", stop);
+    }
   } catch (error) {
     log.error(
       error instanceof Error
