@@ -1,5 +1,39 @@
 # @specify-sh/publisher-sdk
 
+## 1.1.0
+
+### Minor Changes
+
+- 85d168f: Add `onIdentityChange(listener)` to the publisher SDK. Register a listener to
+  find out when a new `serve()` call would send a better identity than the last
+  one would have: a wallet address newly added via `identify()`, or cookie
+  consent newly granted via `setCookieConsent(true)`. Use it to re-serve an
+  already-rendered ad slot when the user connects a wallet mid-session. A
+  consent withdrawal and the eviction of old addresses past the 50-address cap
+  do not fire it. Several changes in the same tick coalesce into one listener
+  call, delivered in a microtask after the change. It returns an unsubscribe
+  function that detaches the listener and is safe to call twice. Outside a
+  browser, such as during a server render, it does nothing and still hands back
+  a callable unsubscribe.
+- abc6b9d: Add a `@specify-sh/publisher-sdk/react` entry exporting `useSpecifyAd()`, a
+  hook that turns a Client Component into an ad slot. Pass your Specify client
+  in the options, with an optional wallet address or array ahead of them:
+  `useSpecifyAd({ specify, imageFormat })` or
+  `useSpecifyAd(wallets, { specify, imageFormat, adUnitId })`. It serves once on
+  mount, serves again when `identify()` registers a new wallet or consent is
+  granted, and returns the ad or null while the slot is empty. The first ad to
+  arrive is kept for the life of the component: a filled slot never swaps or
+  goes blank, and later wallet changes are ignored. An inline wallet array and
+  a fresh options object per render are safe; neither triggers another serve.
+  Errors never reach your component — a bad address leaves the slot empty. The
+  entry ships with a `use client` directive, React 18 or 19 is an optional peer
+  dependency, and importing it from a Server Component fails its build with a
+  message pointing at `@specify-sh/publisher-sdk/server`.
+
+### Patch Changes
+
+- 2b5a13e: Track the pending identity-change flush as a nullable promise instead of a boolean, so the coalescing guard reads as reachable to static analysis.
+
 ## 1.0.0
 
 ### Major Changes

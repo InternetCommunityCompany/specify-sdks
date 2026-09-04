@@ -26,10 +26,16 @@
     },
     "packages/publisher-sdk": {
       "name": "@specify-sh/publisher-sdk",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "dependencies": {
-        "@specify-sh/core": "workspace:*",
+        "@specify-sh/core": "0.1.0",
       },
+      "peerDependencies": {
+        "react": "^18 || ^19",
+      },
+      "optionalPeers": [
+        "react",
+      ],
     },
   },
   "packages": {
