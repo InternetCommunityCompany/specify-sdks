@@ -92,7 +92,8 @@ export default class Specify {
 
   private readonly identitySubscriptions = new Set<IdentitySubscription>();
 
-  private identityFlushScheduled = false;
+  /** The scheduled flush, or null when none is pending. */
+  private identityFlush: Promise<void> | null = null;
 
   /**
    * Creates a Specify client
@@ -200,15 +201,16 @@ export default class Specify {
   }
 
   private scheduleIdentityChange(): void {
-    if (this.identityFlushScheduled || this.identitySubscriptions.size === 0) {
+    if (this.identityFlush !== null || this.identitySubscriptions.size === 0) {
       return;
     }
-    this.identityFlushScheduled = true;
-    queueMicrotask(() => this.flushIdentityChange());
+    this.identityFlush = Promise.resolve().then(() =>
+      this.flushIdentityChange()
+    );
   }
 
   private flushIdentityChange(): void {
-    this.identityFlushScheduled = false;
+    this.identityFlush = null;
     for (const subscription of [...this.identitySubscriptions]) {
       if (!this.identitySubscriptions.has(subscription)) {
         continue;
