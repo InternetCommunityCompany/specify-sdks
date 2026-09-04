@@ -232,6 +232,29 @@ try {
       "The installed wizard must print usage through its bin shim"
     );
   }
+  try {
+    execFileSync(
+      join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
+      [],
+      {
+        cwd: wizardConsumerDirectory,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 3000,
+      }
+    );
+    throw new Error("The installed wizard must reject closed stdin");
+  } catch (error) {
+    if (
+      !(error instanceof Error && "status" in error) ||
+      error.status !== 1 ||
+      !("stdout" in error) ||
+      typeof error.stdout !== "string" ||
+      !error.stdout.includes("needs a real terminal")
+    ) {
+      throw error;
+    }
+  }
   console.log("Verified the installed wizard runs through its bin shim");
 
   const consumerDirectory = join(scratch, "consumer");

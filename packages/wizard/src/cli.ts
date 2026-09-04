@@ -56,6 +56,13 @@ async function runCli(): Promise<number> {
       );
       return 1;
     }
+    if (!process.stdin.isTTY) {
+      log.error(
+        "The publisher wizard needs a real terminal. To add the SDK by hand, follow https://docs.specify.sh/publishing/get-started.",
+        io
+      );
+      return 1;
+    }
     // Ctrl-C between prompts reaches us as SIGINT, and the agent turn in
     // flight has to be told, or its CLI keeps running after the wizard exits.
     const stopping = new AbortController();
