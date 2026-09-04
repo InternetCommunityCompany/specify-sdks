@@ -1,19 +1,34 @@
 # Specify SDKs
 
-This Bun workspace contains Specify's JavaScript SDK packages.
+Client libraries for [Specify](https://specify.sh), the ad network for onchain audiences.
 
-Install dependencies with `bun install`, then run the repository gates with `bun run check`, `bun run types`,
-`bun run test`, and `bun run build`.
+| Package | |
+| --- | --- |
+| [`@specify-sh/publisher-sdk`](https://www.npmjs.com/package/@specify-sh/publisher-sdk) | Serve ads in a browser, on a server, or from a React component |
+| `@specify-sh/core` | Shared internals. Not meant to be installed directly |
 
-`biome.json` extends Ultracite and disables no rule. It sets `files.includes` because Ultracite's inherited exclusions
-match `**/.cache`, which silently matches some checkout paths and leaves Biome checking zero files — `check` then passes
-while checking nothing. It is written as `["**/*"]` rather than `["**"]` so it does not itself trip
-`noBiomeFirstException`.
+## Documentation
 
-`build` and `types` run through `turbo run`, which caches each package's output and skips work a later run does not
-need to redo. `check` and `test` do not, because Ultracite and Vitest already run across the whole workspace in one
-process; there is no per-package split for turbo to schedule. `.turbo/` is gitignored because turbo writes a log file
-under it inside each package, and an untracked file there would otherwise change that package's input hash on every
-run and defeat the cache. `tsconfig.base.json` is listed under `globalDependencies` because every package's
-`tsconfig.build.json` extends it, so it decides what `tsc` emits; without that entry turbo would not notice it
-changed and would hand back a `dist/` built with the old compiler options.
+**[docs.specify.sh/publishing/get-started](https://docs.specify.sh/publishing/get-started)**
+
+- [Browser SDK reference](https://docs.specify.sh/publishing/sdk-browser)
+- [Node.js SDK reference](https://docs.specify.sh/publishing/sdk-server)
+- [Migrating from v0.4.x](https://docs.specify.sh/publishing/migrating-from-v0-4)
+
+## Development
+
+```bash
+bun install
+bun run check
+bun run types
+bun run test
+bun run build
+```
+
+Changes to a package's public exports need a changeset:
+
+```bash
+bunx changeset
+```
+
+MIT © The Internet Community Company
