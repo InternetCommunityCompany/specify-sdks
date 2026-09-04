@@ -40,6 +40,13 @@ describe("fetchReference", () => {
       "Could not fetch https://docs.specify.sh/llms.txt. Check your connection and retry."
     );
   });
+
+  it("preserves a network failure as the public error cause", async () => {
+    const cause = new Error("socket failed");
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(cause);
+
+    await expect(fetchReference(fetchMock)).rejects.toMatchObject({ cause });
+  });
 });
 
 describe("selectPages", () => {
@@ -82,6 +89,18 @@ describe("selectPages", () => {
 
     expect(reference.missing).toEqual(["/publishing/sdk-server"]);
     expect(reference.pages.map(({ url }) => url)).not.toContain(
+      "/publishing/sdk-server"
+    );
+  });
+
+  it("keeps content that is absent from the index", async () => {
+    const raw = await fixtures();
+    const index = raw.index.replace(SDK_SERVER_INDEX_LINE, "");
+
+    const reference = selectPages({ ...raw, index }, "nextjs", false);
+
+    expect(reference.missing).toEqual([]);
+    expect(reference.pages.map(({ url }) => url)).toContain(
       "/publishing/sdk-server"
     );
   });

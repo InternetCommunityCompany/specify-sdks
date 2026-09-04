@@ -164,10 +164,13 @@ describe("anyAgentSeam", () => {
   });
 
   it("replaces upstream failures with actionable errors", async () => {
-    mocks.detect.mockRejectedValue(new Error("private upstream detail"));
+    const cause = new Error("private upstream detail");
+    mocks.detect.mockRejectedValue(cause);
 
-    await expect(anyAgentSeam().detect()).rejects.toThrow(
-      "Could not detect coding agents. Check that your coding agent is installed and available on PATH, then try again."
-    );
+    await expect(anyAgentSeam().detect()).rejects.toMatchObject({
+      cause,
+      message:
+        "Could not detect coding agents. Check that your coding agent is installed and available on PATH, then try again.",
+    });
   });
 });

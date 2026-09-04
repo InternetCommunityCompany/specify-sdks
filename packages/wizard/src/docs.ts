@@ -48,7 +48,7 @@ async function fetchText(fetchImpl: typeof fetch, url: string) {
 
 function docsError(url: string, cause?: unknown): Error {
   return new Error(`Could not fetch ${url}. Check your connection and retry.`, {
-    cause: cause === undefined ? undefined : "Documentation request failed",
+    cause,
   });
 }
 
@@ -91,7 +91,7 @@ export function selectPages(
   const missing: string[] = [];
   for (const url of selected) {
     const content = sections.get(url);
-    if (!(raw.index.includes(`](${url})`) && content)) {
+    if (!content) {
       missing.push(url);
       continue;
     }

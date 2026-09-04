@@ -207,6 +207,33 @@ try {
   }
   console.log("Verified the wizard CLI artifact and runtime dependencies");
 
+  const wizardConsumerDirectory = join(scratch, "wizard-consumer");
+  mkdirSync(wizardConsumerDirectory, { recursive: true });
+  writeFileSync(
+    join(wizardConsumerDirectory, "package.json"),
+    JSON.stringify({
+      dependencies: {
+        "@specify-sh/wizard": `file:${wizard.tarball}`,
+      },
+      private: true,
+    })
+  );
+  execFileSync("npm", ["install", "--ignore-scripts"], {
+    cwd: wizardConsumerDirectory,
+    stdio: "inherit",
+  });
+  const wizardHelp = execFileSync(
+    join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
+    ["--help"],
+    { cwd: wizardConsumerDirectory, encoding: "utf8" }
+  );
+  if (!wizardHelp.includes("Usage")) {
+    throw new Error(
+      "The installed wizard must print usage through its bin shim"
+    );
+  }
+  console.log("Verified the installed wizard runs through its bin shim");
+
   const consumerDirectory = join(scratch, "consumer");
   mkdirSync(consumerDirectory, { recursive: true });
   const rootManifest: PackageManifest = JSON.parse(

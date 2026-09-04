@@ -34,6 +34,7 @@ export interface AgentConversation {
 
 export interface AgentSeam {
   detect: () => Promise<DetectedAgent[]>;
+  /** The agent must be one of the exact objects returned by detect, not a copy. */
   open: (agent: DetectedAgent, cwd: string) => AgentConversation;
 }
 
@@ -43,9 +44,7 @@ const TURN_ERROR =
   "The coding agent could not complete the request. Check its authentication and try again.";
 
 function publicError(message: string, cause?: unknown): Error {
-  return new Error(message, {
-    cause: cause === undefined ? undefined : "Coding agent operation failed",
-  });
+  return new Error(message, { cause });
 }
 
 async function finishRun(
