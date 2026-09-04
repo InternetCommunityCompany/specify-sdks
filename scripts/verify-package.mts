@@ -14,6 +14,7 @@ const archivesDirectory = join(scratch, "archives");
 const packagesDirectory = join(scratch, "packages");
 
 interface PackageManifest {
+  bin?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   exports?: unknown;
@@ -82,6 +83,7 @@ try {
 
   const core = packPackage("packages/core", "core");
   const publisher = packPackage("packages/publisher-sdk", "publisher-sdk");
+  const wizard = packPackage("packages/wizard", "wizard");
 
   requireFile(core.files, "dist/index.js");
   requireFile(core.files, "dist/index.js.map");
@@ -173,6 +175,37 @@ try {
     throw new Error("Publisher must declare react as an optional peer");
   }
   console.log("Verified the react entry keeps its directive and externals");
+
+  requireFile(wizard.files, "dist/cli.js");
+  requireFile(wizard.files, "dist/cli.js.map");
+  if (wizard.files.some((path) => path.startsWith("package/src/"))) {
+    throw new Error("Wizard tarball must not contain source files");
+  }
+  if (wizard.manifest.bin?.["specify-wizard"] !== "./dist/cli.js") {
+    throw new Error("Wizard manifest must expose the built CLI");
+  }
+  const wizardCli = readFileSync(
+    join(wizard.directory, "dist", "cli.js"),
+    "utf8"
+  );
+  if (!wizardCli.startsWith("#!/usr/bin/env node")) {
+    throw new Error("The packed wizard CLI must start with a Node shebang");
+  }
+  for (const dependency of ["anyagent-js", "@clack/prompts"]) {
+    if (!wizard.manifest.dependencies?.[dependency]) {
+      throw new Error(`Wizard must declare ${dependency} in dependencies`);
+    }
+    if (
+      wizard.manifest.devDependencies?.[dependency] ||
+      wizard.manifest.peerDependencies?.[dependency]
+    ) {
+      throw new Error(`Wizard must declare ${dependency} only in dependencies`);
+    }
+    if (!wizardCli.includes(dependency)) {
+      throw new Error(`Wizard CLI must retain its ${dependency} import`);
+    }
+  }
+  console.log("Verified the wizard CLI artifact and runtime dependencies");
 
   const consumerDirectory = join(scratch, "consumer");
   mkdirSync(consumerDirectory, { recursive: true });

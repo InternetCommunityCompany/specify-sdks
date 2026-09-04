@@ -1,0 +1,1158 @@
+# Analytics SDK setup
+URL: /advertising/analytics-sdk-setup
+
+<Callout type="warn" title="Coming soon">
+  `@specify-sh/advertiser-sdk` is not published yet. Follow this guide once it ships; until then, conversions are already tracked onchain with no setup.
+</Callout>
+
+Use this guide to install the Analytics SDK, wire up consent, and start capturing funnel events on your own site. For the full API and what the SDK captures, see the [Analytics SDK reference](analytics-sdk).
+
+**Use the setup wizard.** The wizard runs through the coding-agent CLI you already use, including Claude Code, Codex, Cursor, Gemini CLI, and others. It inspects your codebase, suggests the funnel events worth tracking based on what it finds there, proposes a plan for your approval, then implements and verifies it. If it cannot find an agent CLI, it prints the complete manual instructions.
+
+```bash
+npx @specify-sh/wizard --advertiser
+```
+
+The manual steps below remain the canonical setup path.
+
+## Quick start
+
+```bash
+npm install @specify-sh/advertiser
+```
+
+```ts
+import { SpecifyAnalytics } from '@specify-sh/advertiser';
+
+const analytics = new SpecifyAnalytics({ propertyKey: 'adv_…' });
+
+// 1. Wire consent from your CMP / consent banner, on every page load:
+onConsentChange((granted) =>
+  granted
+    ? analytics.consentForEnhancedTracking()
+    : analytics.revokeEnhancedTrackingConsent(),
+);
+
+// 2. Tell Specify when a wallet connects on your site:
+onWalletConnect((addresses) => analytics.identify(addresses));
+
+// 3. Log the milestones you care about:
+analytics.logEvent('signup_completed', { plan: 'pro' });
+```
+
+You'll receive your `adv_` property key when we set up funnel analytics for your campaign. It identifies your site, the same way a publisher key identifies a publisher.
+
+Page views and wallet connections are captured automatically (see below), so for many sites steps 1 and 2 are the whole integration.
+
+## Consent comes first, literally
+
+Nothing leaves the page without consent. Until your consent banner reports approval and you call `consentForEnhancedTracking()`, events are held in memory only. Never sent, never stored, gone when the tab closes. Granting consent releases the held events in order, so the landing-page view that happened moments before the user clicked "Accept" still makes it into the funnel. Revoking consent stops sending immediately.
+
+Consent is deliberately **not persisted by the SDK**. It lives on the instance for the lifetime of the page, which keeps your CMP the single source of truth: call the gate on every page load where the user has consented, and a withdrawal takes effect on the very next pageview.
+
+```ts
+analytics.hasEnhancedTrackingConsent(); // -> boolean
+```
+
+With consent granted, the SDK sends credentialed requests, which is what lets Specify recognise the visitor as the same person who saw the ad on a publisher site: the cross-site link that makes the funnel joinable. The SDK itself never sees or handles that identifier; the mechanism is the same server-side identity used by [Enhanced Tracking](https://specify.sh/blog/publisher-sdk-v1) on the publisher side.
+
+## Retargeting your visitors
+
+The most valuable audience in advertising is the one that already came to you: people who saw your ad, visited your site, maybe connected a wallet, and left without converting. The Analytics SDK turns that audience into one your campaigns can reach again.
+
+When a visitor connects a wallet on your site, passed through `identify()` or picked up by passive detection, that wallet becomes part of what Specify knows about your funnel. Because Specify serves ads by wallet across the whole network, those visitors can be **retargeted wherever they show up next**: on the wallets, explorers, and dapps where Specify serves, your campaign can specifically reach the users who visited but didn't convert. For consenting users, [Enhanced Tracking](https://specify.sh/blog/publisher-sdk-v1) extends that reach further. They can be recognised even on network pages where no wallet is connected at all.
+
+The same signal works in reverse, and this is where it quietly pays for itself. Combined with [exclusion targeting](targeting#exclusion-targeting), visitors who *did* convert stop being shown your acquisition ads, so your budget concentrates on the warm middle of the funnel instead of people who are already users.
+
+Talk to us about enabling a retargeting segment for your campaign. Because it's built from your own visitors, it's typically the highest-intent audience a campaign can run against.
+
+## Installing through a tag manager
+
+If you'd rather not touch your bundle, the same feature set is available as a script through Google Tag Manager or any CMS that lets you add HTML:
+
+```html
+<script>window.specifyAnalytics=window.specifyAnalytics||function(){(window.specifyAnalytics.q=window.specifyAnalytics.q||[]).push(arguments)};</script>
+<script async src="https://spfsrv.com/sdk/advertiser/v1.js"></script>
+```
+
+Then use commands anywhere on the page, before or after the script loads; calls are queued and replayed in order:
+
+```html
+<script>
+  specifyAnalytics('init', { propertyKey: 'adv_…' });
+  specifyAnalytics('consent');                          // from your CMP tag
+  specifyAnalytics('identify', ['0xabc…']);             // on wallet connect
+  specifyAnalytics('event', 'signup_completed', { plan: 'pro' });
+</script>
+```
+
+Commands: `init`, `consent`, `revokeConsent`, `identify`, `event`. Tag ordering doesn't matter. Commands fired before `init` are buffered and run once it arrives.
+
+For the full method list, what gets captured, and the privacy posture, see the [Analytics SDK reference](analytics-sdk).
+
+---
+
+# Analytics SDK reference
+URL: /advertising/analytics-sdk
+
+<Callout type="warn" title="Coming soon">
+  `@specify-sh/advertiser-sdk` is not published yet, so nothing on this page can be installed today.
+
+  You do not need it to run a campaign: conversions are measured onchain and require no integration at all. This SDK adds funnel visibility on your own site on top of that.
+</Callout>
+
+The Analytics SDK is an optional library you add to your own site to record funnel events: page views, wallet connections, and any product milestones you choose. Specify measures conversions onchain, so conversion measurement and billing need none of this.
+
+Follow the [setup guide](analytics-sdk-setup) for installation and consent.
+
+## Constructor
+
+```ts
+new SpecifyAnalytics({ propertyKey, privacy?, edge? })
+```
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `propertyKey` | Yes | Identifies your site. Throws if malformed. |
+| `privacy.disableWalletDetection` | No | Turns off automatic wallet detection. |
+
+## `consentForEnhancedTracking()`
+
+```ts
+consentForEnhancedTracking()
+```
+
+Starts sending events, credentialed. Call on every page load where consent is granted.
+
+## `revokeEnhancedTrackingConsent()`
+
+```ts
+revokeEnhancedTrackingConsent()
+```
+
+Stops sending immediately. Later events are held in memory only.
+
+## `hasEnhancedTrackingConsent()`
+
+```ts
+hasEnhancedTrackingConsent()
+```
+
+Whether events are currently being sent.
+
+## `identify(addressOrAddresses)`
+
+```ts
+identify(addressOrAddresses)
+```
+
+Registers wallet address(es) connected on your site, the strongest signal you can send. Call it in your wallet-connect callback (WalletConnect sessions are invisible to passive detection, so pass those here). Addresses accumulate across calls, are lowercased, and are validated for format; they ride along on every subsequent event.
+
+## `logEvent(name, props?)`
+
+```ts
+logEvent(name, props?)
+```
+
+Records a product milestone, such as `signup_completed` or `deposit_started`. `name` is lowercase `a-z`, `0-9`, and underscores, up to 64 characters. `props` is any JSON-serialisable object up to 8 KB.
+
+## `getDetectedWallets()`
+
+```ts
+getDetectedWallets()
+```
+
+Addresses found by passive detection, lowercased.
+
+## `destroy()`
+
+```ts
+destroy()
+```
+
+Flushes pending events and detaches all listeners. Call when tearing down an SPA view.
+
+## Captured events
+
+**Automatically:**
+
+- `page_view`: on load and on client-side route changes in single-page apps. No configuration; duplicate views of the same URL are not re-emitted.
+- `wallet_detected` / `wallet_changed`: the SDK passively notices wallets already connected to your page via EIP-6963 (with a `window.ethereum` fallback). Detection is silent: it only reads already-connected accounts, never prompts, never opens a wallet, never requests permissions. Turn it off with `privacy.disableWalletDetection`.
+
+**Manually:**
+
+- `logEvent(name, props?)`: any product milestone you choose to record.
+
+Every event carries the page URL and referrer, a per-tab session id, the wallets known so far, and the click id (`spclid`) when the visit came from a Specify ad. The click id is captured from the landing URL automatically and kept for the whole session, so events after the first navigation still tie back to the ad.
+
+## Batching and network
+
+Events are batched: flushed every few seconds, on batch fill, and when the page is hidden or closed. The SDK adds no meaningful network overhead.
+
+If you enforce a Content-Security-Policy, add `https://spfsrv.com` to `connect-src` (and to `script-src` if you use the tag-manager install).
+
+## Privacy
+
+- **Consent-gated at the source.** No consent means no network requests, not anonymised events, not "essential" events.
+- **No new data about anyone.** The SDK sees only what your page already sees: its own URL, and wallets the user has already, voluntarily connected.
+- **Wallet detection never prompts** and can be disabled entirely; `identify()` and `logEvent()` still work with detection off.
+- **Nothing here affects billing.** Events cannot trigger charges, and there's no incentive mechanism tied to volume.
+
+---
+
+# A/B testing with ad unit IDs
+URL: /publishing/ad-unit-ids
+
+If you have more than one placement in your app, such as a header banner, an inline card, or a sidebar slot, you'll want to know which ones are actually performing.
+
+Every call to `serve` accepts an **`adUnitId`**, a string you define to label each distinct placement. Specify then tracks impressions and conversions separately per ad unit, so you can see in your dashboard:
+
+- **Which placements convert best**, and therefore contribute most to your revenue share tier
+- **Which placements are dragging down your average**, and might be better removed, redesigned, or moved
+- **A/B test results**: run two variants of the same placement under different ad unit IDs and compare real conversion data
+
+## How to use it
+
+Pass a different `adUnitId` from each placement.
+
+```js tab="JavaScript" title='placements.js' tab-group='lang'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+const header = await specify.serve(wallets, {
+  imageFormat: ImageFormat.LONG_BANNER,
+  adUnitId: 'header-banner'
+});
+
+const sidebar = await specify.serve(wallets, {
+  imageFormat: ImageFormat.LANDSCAPE,
+  adUnitId: 'sidebar-inline'
+});
+```
+
+```ts tab="TypeScript" title='placements.ts'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+const header = await specify.serve(wallets, {
+  imageFormat: ImageFormat.LONG_BANNER,
+  adUnitId: 'header-banner'
+});
+
+const sidebar = await specify.serve(wallets, {
+  imageFormat: ImageFormat.LANDSCAPE,
+  adUnitId: 'sidebar-inline'
+});
+```
+
+To A/B test one placement, serve the variants under different IDs and compare them in your dashboard.
+
+```js title='ab-test.js'
+const adUnitId = userBucket === 'a' ? 'swap-card-v1' : 'swap-card-v2';
+
+const ad = await specify.serve(wallets, {
+  imageFormat: ImageFormat.LANDSCAPE,
+  adUnitId
+});
+```
+
+Pick any naming scheme that works for you. Common patterns:
+
+- By location: `header-banner`, `sidebar-inline`, `footer-leaderboard`
+- By variant: `swap-card-v1`, `swap-card-v2`
+- By page: `dashboard-hero`, `portfolio-inline`, `settings-footer`
+
+The IDs are opaque to us. They're purely for your own analysis. Keep them consistent across deploys so your historical data stays comparable.
+
+## Why it's worth doing
+
+Most publishers who A/B test discover that their placements perform very differently from what they expected. A placement that looks great in design review often underperforms a less prominent one that happens to hit users at a more receptive moment. The only way to know is to measure.
+
+---
+
+# JavaScript
+URL: /publishing/javascript
+
+<include>../../partials/wizard-publisher.mdx</include>
+
+## Manual setup
+
+### 1. Install the SDK
+
+```npm
+npm i @specify-sh/publisher-sdk
+```
+
+### 2. Initialize the client
+
+You will need a publisher key. See [Publisher keys](publisher-keys).
+
+Create the client once and import it wherever you serve an ad. Use the publisher key via your environment.
+
+```js tab="JavaScript" title='lib/specify.js' tab-group='lang'
+const specifyPublisherKey = 'spk_123...' // Bring this from your environment
+
+export const specify = new Specify({
+  publisherKey: specifyPublisherKey
+});
+```
+
+```ts tab="TypeScript" title='lib/specify.ts'
+const specifyPublisherKey = 'spk_123...' // Bring this from your environment
+
+export const specify = new Specify({
+  publisherKey: specifyPublisherKey
+});
+```
+
+### 3. Connect consent
+
+If your site has a consent management platform, connect its targeted-advertising state to the SDK on every page load. The SDK does not persist consent.
+
+```js tab="JavaScript" title='cmp.js' tab-group='lang'
+import { specify } from './lib/specify';
+
+// Adapt this code to your cookie consent management tool
+specify.setCookieConsent(cmp.getConsent().targetedAdvertising);
+
+cmp.onConsentChange((consent) => {
+  specify.setCookieConsent(consent.targetedAdvertising);
+});
+```
+
+```ts tab="TypeScript" title='cmp.ts'
+import { specify } from './lib/specify';
+
+// Adapt this code to your cookie consent management tool
+specify.setCookieConsent(cmp.getConsent().targetedAdvertising);
+
+cmp.onConsentChange((consent) => {
+  specify.setCookieConsent(consent.targetedAdvertising);
+});
+```
+
+With consent granted, Specify recognises returning visitors across every site in our network, so a placement can fill even when the user has not connected a wallet to your app.
+
+### 4. Serve an ad
+
+Choose the image format that matches your placement, and pass any wallet address the visitor controls.
+
+Wrap the call so it can run more than once. A first serve often has neither consent nor a wallet to go on, and both usually arrive a moment later.
+
+```js tab="JavaScript" title='ad-slot.js' tab-group='lang'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+let filled = false;
+
+export async function serveAd(wallet) {
+  if (filled) return;
+
+  const ad = await specify.serve(wallet ?? null, {
+    imageFormat: ImageFormat.LANDSCAPE,
+    adUnitId: 'sidebar'
+  });
+
+  if (!ad) return;
+
+  filled = true;
+  render(ad);
+}
+
+specify.onIdentityChange(serveAd);
+serveAd();
+```
+
+```ts tab="TypeScript" title='ad-slot.ts'
+import { specify } from './lib/specify';
+import { ImageFormat, type Address } from '@specify-sh/publisher-sdk';
+
+let filled = false;
+
+export async function serveAd(wallet?: Address | null): Promise<void> {
+  if (filled) return;
+
+  const ad = await specify.serve(wallet ?? null, {
+    imageFormat: ImageFormat.LANDSCAPE,
+    adUnitId: 'sidebar'
+  });
+
+  if (!ad) return;
+
+  filled = true;
+  render(ad);
+}
+
+specify.onIdentityChange(serveAd);
+serveAd();
+```
+
+`onIdentityChange()` runs when a wallet is registered or consent is granted, so a slot that came back empty tries again on its own. The `filled` flag keeps it to one ad: asking again over an ad already on the page would replace what the visitor is looking at.
+
+Available [image formats](sdk-browser#image-formats) and the [fields returned](sdk-browser#specifyad) in the ad can be found in the [Browser SDK reference](sdk-browser).
+
+## Network requirements
+
+The SDK sends ad requests to `https://spfsrv.com`. After consent, the browser sends these requests with credentials. If your site has a Content Security Policy, add `https://spfsrv.com` to `connect-src`.
+
+Send SDK traffic straight to Specify. Do not proxy it through your backend because a proxy strips cookies and geolocation information.
+
+## Next steps
+
+<Cards>
+  <Card icon={<BookOpen />} title="Browser SDK reference" description="Full reference for the Browser SDK." href="sdk-browser" />
+  <Card icon={<LayoutTemplate />} title="Placements" description="Where best to put an ad." href="placements" />
+  <Card icon={<TrendingUp />} title="Improve results" description="Raise your fill rate and improve earnings." href="improving-results" />
+</Cards>
+
+---
+
+# Passing multiple wallets
+URL: /publishing/multiple-wallets
+
+The single biggest lever for many publishers, is **passing every wallet you know about for a user**.
+
+Most publishers allow users to connect one wallet at a time and have no history of others. But if your platform does know about multiple wallets for a single user, you can pass them as an **array** to our `serve` function.
+
+```js tab="JavaScript" title='ad-slot.js' tab-group='lang'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+// Every address this user controls, not just the connected one
+const ad = await specify.serve(
+  ['0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'],
+  { imageFormat: ImageFormat.LANDSCAPE, adUnitId: 'sidebar' }
+);
+```
+
+```ts tab="TypeScript" title='ad-slot.ts'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+// Every address this user controls, not just the connected one
+const ad = await specify.serve(
+  ['0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'],
+  { imageFormat: ImageFormat.LANDSCAPE, adUnitId: 'sidebar' }
+);
+```
+
+## Why this matters so much
+
+- **Better targeting, better fill.** The more active wallets we have for a user, the clearer the picture of what protocols they use, and the more accurately we can match them to a relevant ad. More matches means more ads served.
+- **More conversions caught.** We track conversion activity across every wallet you pass us. If a user sees your ad and then tests the advertised product on a separate wallet, we still catch the conversion, and you still earn the revenue share.
+
+## Only pass wallets the user controls
+
+Many wallet apps let people watch an address they do not own, to follow a whale or monitor a treasury. Filter those out before calling `serve()`. Pass accounts the user holds keys for, and nothing else.
+
+For other apps, the same applies to any address you display but the user does not control: addresses pasted into a search box etc.
+
+## Example: a wallet publisher
+
+A user of your wallet app probably has several accounts set up. You already know all of those addresses.
+
+Pass the full array to `serve` and:
+
+- We see the complete onchain footprint of the user, not just whichever address they happen to have selected in your UI
+- We can attribute conversions across *any* of their wallets, not just the active one
+- Your inventory becomes dramatically more valuable to advertisers, which feeds into your revenue share tier
+
+---
+
+# Next.js
+URL: /publishing/nextjs
+
+<include>../../partials/wizard-publisher.mdx</include>
+
+## Manual setup
+
+Next.js can serve ads two ways:
+
+| Where you serve | Import | Identity comes from |
+| --- | --- | --- |
+| Client component | `@specify-sh/publisher-sdk` | The visitor's cookie, plus wallets you pass |
+| Server component, route handler, server action (Not recommended) | `@specify-sh/publisher-sdk/server` | Wallets you pass |
+
+Only the browser can hold the Specify cookie, so only client components can fill a placement for a visitor who has no wallet connected. We recommend that you serve from the client when possible as this will give you higher fill rates.
+
+### 1. Install
+
+```npm
+npm i @specify-sh/publisher-sdk
+```
+
+### 2. Set your keys
+
+You will need a publisher key. See [Publisher keys](publisher-keys).
+
+The environment variable needs a `NEXT_PUBLIC_` variable which is fine: publisher keys are public by design.
+
+```bash title=".env.local"
+NEXT_PUBLIC_SPECIFY_PUBLISHER_KEY=spk_your_key_here
+```
+
+### 3. Serve an ad
+
+Create the client in its own module and import it where you need it.
+
+```ts title="lib/specify.ts"
+import Specify from '@specify-sh/publisher-sdk';
+
+export const specify = new Specify({
+  publisherKey: process.env.NEXT_PUBLIC_SPECIFY_PUBLISHER_KEY!
+});
+```
+
+`useSpecifyAd()` serves on mount, tries again when the identity improves, and keeps the first ad it gets.
+
+```tsx title="components/AdSlot.tsx"
+'use client';
+
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+import { useSpecifyAd } from '@specify-sh/publisher-sdk/react';
+import { specify } from '@/lib/specify';
+
+export function AdSlot() {
+  const ad = useSpecifyAd({
+    specify,
+    imageFormat: ImageFormat.LANDSCAPE,
+    adUnitId: 'sidebar'
+  });
+
+  if (!ad) return null;
+
+  return (
+    <a href={ad.ctaUrl} target="_blank" rel="noopener noreferrer">
+      {ad.imageUrl && <img src={ad.imageUrl} alt="" />}
+      <h3>{ad.headline}</h3>
+      <p>{ad.content}</p>
+      <span>{ad.ctaLabel}</span>
+    </a>
+  );
+}
+```
+
+Importing it from a Server Component fails the build with a message telling you to add `'use client'` or use the server entry instead.
+
+The slot takes no addresses. Wallets registered through `identify()` ride along, so nothing has to be passed down the tree.
+
+Available [image formats](sdk-browser#image-formats) and the [fields returned](sdk-browser#specifyad) in the ad can be found in the [Browser SDK reference](sdk-browser).
+
+### 4. Connect consent
+
+Wire your consent platform to the SDK, high in the component tree. Consent starts `false` and the SDK never stores it.
+
+```tsx title="components/ConsentBridge.tsx"
+'use client';
+
+import { useEffect } from 'react';
+import { specify } from '@/lib/specify';
+
+export function ConsentBridge() {
+  useEffect(() => cmp.onChange((consent) => {
+    specify.setCookieConsent(consent.targetedAdvertising);
+  }), []);
+
+  return null;
+}
+```
+
+With consent granted, Specify recognises returning visitors across every site in our network, so a placement can fill even when nobody has connected a wallet to your app.
+
+### 5. Register connected wallets
+
+If your app has a wallet connection flow, notify the SDK when a wallet is connected. Every later `serve()` includes it, so components deeper in the tree do not need the address passed down.
+
+```tsx title="components/WalletBridge.tsx"
+'use client';
+
+import { useEffect } from 'react';
+import { useAccount } from 'wagmi';
+import { specify } from '@/lib/specify';
+
+export function WalletBridge() {
+  const { address } = useAccount();
+
+  useEffect(() => {
+    if (address) specify.identify(address);
+  }, [address]);
+
+  return null;
+}
+```
+
+With this in place, an ad slot needs no wallet address at all.
+
+```tsx title='components/AdSlot.tsx'
+specify.serve({ imageFormat: ImageFormat.LANDSCAPE, adUnitId: 'sidebar' })
+```
+
+## Serving from a server component
+
+```tsx title="app/page.tsx"
+import { serve, ImageFormat } from '@specify-sh/publisher-sdk/server';
+
+export default async function Page() {
+  const ad = await serve({
+    publisherKey: process.env.SPECIFY_PUBLISHER_KEY!,
+    walletAddresses: ['0x1111111111111111111111111111111111111111'],
+    imageFormat: ImageFormat.LANDSCAPE,
+    adUnitId: 'sidebar'
+  });
+
+  if (!ad) return null;
+
+  return <a href={ad.ctaUrl}>{ad.headline}</a>;
+}
+```
+
+`walletAddresses` is required here.
+
+#### Importing the wrong entrypoint
+
+Importing `@specify-sh/publisher-sdk` from a server component fails immediately, with a message telling you to use `@specify-sh/publisher-sdk/server`.
+
+## Next steps
+
+<Cards>
+  <Card icon={<BookOpen />} title="Browser SDK reference" description="Full reference for the Browser SDK." href="sdk-browser" />
+  <Card icon={<LayoutTemplate />} title="Placements" description="Where best to put an ad." href="placements" />
+  <Card icon={<TrendingUp />} title="Improve results" description="Raise your fill rate and improve earnings." href="improving-results" />
+</Cards>
+
+---
+
+# Publisher keys
+URL: /publishing/publisher-keys
+
+A publisher key identifies your organization on every serve request. It's a string that starts with `spk_`.
+
+## Create a key
+
+1. Open the [Publisher Keys](https://app.specify.sh/publish/publisher-keys) page on the Specify dashboard.
+2. You should see a Development key already generated for you. If not you can generate a key by clicking the **Create New +** button.
+3. Copy the key and store it with your other configuration.
+
+## Development and production keys
+
+**Development keys** are meant to be used when you're developing the integration and in dev environments. They work straight away, including while your organization is still pending approval. They return rotating sample ads and never touch your reporting. Always use a Development key everywhere except production.
+
+**Production keys** serve real campaigns and earn revenue. This is what you should be using when your app is deployed in production. To create one your organization needs to be approved.
+
+## Where to put it
+
+Publisher keys ship to the browser, so they are public by design. There is nothing to hide, and no secret to leak.
+
+However you should still read it from your environment rather than hardcoding it, so development and production builds pick up the right one.
+
+```bash title=".env.local"
+SPECIFY_PUBLISHER_KEY=spk_1234567890abcdef1234567890abcd
+```
+
+```ts title="lib/specify.ts"
+const specify = new Specify({
+  publisherKey: process.env.SPECIFY_PUBLISHER_KEY!
+});
+```
+
+## Revoking a key
+
+Delete the key from the [Publisher Keys](https://app.specify.sh/publish/publisher-keys) page. Revocation is immediate: the next request using it is rejected with a `401`, and any placement relying on it stops filling. Create the replacement and deploy it before deleting the old one.
+
+## Invalid keys
+
+The SDK throws `ValidationError` at construction if a key is malformed. A key that is well formed but unknown or revoked fails at request time instead, and `serve()` will return `null`.
+
+---
+
+# React
+URL: /publishing/react
+
+<include>../../partials/wizard-publisher.mdx</include>
+
+## Manual setup
+
+### 1. Install the SDK
+
+```npm
+npm i @specify-sh/publisher-sdk
+```
+
+### 2. Initialize the client
+
+You will need a publisher key. See [Publisher keys](publisher-keys).
+
+Create the client once and import it wherever you serve an ad. Use the publisher key via your environment.
+
+```js tab="JavaScript" title='lib/specify.js' tab-group='lang'
+import Specify from '@specify-sh/publisher-sdk';
+
+const specifyPublisherKey = 'spk_123...' // Bring this from your environment
+
+export const specify = new Specify({
+  publisherKey: specifyPublisherKey
+});
+```
+
+```ts tab="TypeScript" title='lib/specify.ts'
+import Specify from '@specify-sh/publisher-sdk';
+
+const specifyPublisherKey = 'spk_123...' // Bring this from your environment
+
+export const specify = new Specify({
+  publisherKey: specifyPublisherKey
+});
+```
+
+### 3. Build an ad component
+
+`useSpecifyAd()` serves on mount, tries again when the identity improves, and keeps the first ad it gets.
+
+```jsx tab="JavaScript" title='components/AdSlot.jsx' tab-group='lang'
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+import { useSpecifyAd } from '@specify-sh/publisher-sdk/react';
+import { specify } from '../lib/specify';
+
+export function AdSlot() {
+  const ad = useSpecifyAd({
+    specify,
+    imageFormat: ImageFormat.LANDSCAPE,
+    adUnitId: 'sidebar'
+  });
+
+  if (!ad) return null;
+
+  return (
+    <a href={ad.ctaUrl} target="_blank" rel="noopener noreferrer">
+      {ad.imageUrl && <img src={ad.imageUrl} alt="" />}
+      <h3>{ad.headline}</h3>
+      <p>{ad.content}</p>
+      <span>{ad.ctaLabel}</span>
+    </a>
+  );
+}
+```
+
+```tsx tab="TypeScript" title='components/AdSlot.tsx'
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+import { useSpecifyAd } from '@specify-sh/publisher-sdk/react';
+import { specify } from '../lib/specify';
+
+export function AdSlot() {
+  const ad = useSpecifyAd({
+    specify,
+    imageFormat: ImageFormat.LANDSCAPE,
+    adUnitId: 'sidebar'
+  });
+
+  if (!ad) return null;
+
+  return (
+    <a href={ad.ctaUrl} target="_blank" rel="noopener noreferrer">
+      {ad.imageUrl && <img src={ad.imageUrl} alt="" />}
+      <h3>{ad.headline}</h3>
+      <p>{ad.content}</p>
+      <span>{ad.ctaLabel}</span>
+    </a>
+  );
+}
+```
+
+The slot takes no addresses. Wallets registered through `identify()` ride along, so nothing has to be passed down the tree. To serve against an address you hold in the component, pass it first:
+
+```jsx
+const ad = useSpecifyAd(address, { specify, imageFormat: ImageFormat.LANDSCAPE });
+```
+
+Pass every address the visitor controls, not just the active one. [More wallets means better targeting](multiple-wallets).
+
+```jsx
+const ad = useSpecifyAd([address, ...linkedAddresses], {
+  specify,
+  imageFormat: ImageFormat.LANDSCAPE
+});
+```
+
+Available [image formats](sdk-browser#image-formats) and the [fields returned](sdk-browser#specifyad) in the ad can be found in the [Browser SDK reference](sdk-browser).
+
+### 4. Connect consent
+
+Wire your consent platform to the SDK, high in the component tree. Consent starts `false` and the SDK never stores it.
+
+```jsx tab="JavaScript" title='components/ConsentBridge.jsx' tab-group='lang'
+import { useEffect } from 'react';
+import { specify } from '../lib/specify';
+
+// Adapt this code to your cookie consent management tool
+export function ConsentBridge() {
+  useEffect(() => cmp.onChange((consent) => {
+    specify.setCookieConsent(consent.targetedAdvertising);
+  }), []);
+
+  return null;
+}
+```
+
+```tsx tab="TypeScript" title='components/ConsentBridge.tsx'
+import { useEffect } from 'react';
+import { specify } from '../lib/specify';
+
+// Adapt this code to your cookie consent management tool
+export function ConsentBridge() {
+  useEffect(() => cmp.onChange((consent) => {
+    specify.setCookieConsent(consent.targetedAdvertising);
+  }), []);
+
+  return null;
+}
+```
+
+With consent granted, Specify recognises returning visitors across every site in our network, so a placement can fill even when nobody has connected a wallet to your app.
+
+### 5. Register connected wallets
+
+If your app has a wallet connection flow, notify the SDK when a wallet is connected. Every later `serve()` includes it, so components deeper in the tree do not need the address passed down.
+
+```jsx tab="JavaScript" title='components/WalletBridge.jsx' tab-group='lang'
+import { useEffect } from 'react';
+import { useAccount } from 'wagmi';
+import { specify } from '../lib/specify';
+
+export function WalletBridge() {
+  const { address } = useAccount();
+
+  useEffect(() => {
+    if (address) specify.identify(address);
+  }, [address]);
+
+  return null;
+}
+```
+
+```tsx tab="TypeScript" title='components/WalletBridge.tsx'
+import { useEffect } from 'react';
+import { useAccount } from 'wagmi';
+import { specify } from '../lib/specify';
+
+export function WalletBridge() {
+  const { address } = useAccount();
+
+  useEffect(() => {
+    if (address) specify.identify(address);
+  }, [address]);
+
+  return null;
+}
+```
+
+With this in place, an ad slot needs no wallet address at all.
+
+```jsx tab="JavaScript" title='components/AdSlot.jsx' tab-group='lang'
+specify.serve({ imageFormat: ImageFormat.LANDSCAPE, adUnitId: 'sidebar' })
+```
+
+```tsx tab="TypeScript" title='components/AdSlot.tsx'
+specify.serve({ imageFormat: ImageFormat.LANDSCAPE, adUnitId: 'sidebar' })
+```
+
+## Next steps
+
+<Cards>
+  <Card icon={<BookOpen />} title="Browser SDK reference" description="Full reference for the Browser SDK." href="sdk-browser" />
+  <Card icon={<LayoutTemplate />} title="Placements" description="Where best to put an ad." href="placements" />
+  <Card icon={<TrendingUp />} title="Improve results" description="Raise your fill rate and improve earnings." href="improving-results" />
+</Cards>
+
+---
+
+# Recognising returning visitors
+URL: /publishing/returning-visitors
+
+Recognising a returning visitor is particularly valuable for publishers whose users **sometimes have an active wallet connection and sometimes don't**, which describes most dapps. This is most common when the user returns to your site after a period of inactivity.
+
+Without a way to recognise them, those post-disconnection impressions won't see ads at all, because we won't have a wallet address to identify the user.
+
+You can provide us permission to set a cookie with `setCookieConsent(true)` to **greatly increase the percentage of users that see ads**. To do this, you need to get consent from the user via a Consent Management Platform (CMP) or simply a cookie banner.
+
+<Callout>
+  This only applies in a browser. Node.js SDK always needs the wallet addresses passed to `serve()`.
+</Callout>
+
+## Connect your consent banner
+
+Call `setCookieConsent()` twice: once with the answer your consent tool has already stored, as early as you can, and again whenever the visitor changes it. The SDK never stores the answer, so your consent tool stays the only source of truth.
+
+```js tab="JavaScript" title='cmp.js' tab-group='lang'
+import { specify } from './lib/specify';
+
+// Adapt this code to your cookie consent management tool
+
+specify.setCookieConsent(cmp.getConsent().targetedAdvertising);
+
+cmp.onConsentChange((consent) => {
+  specify.setCookieConsent(consent.targetedAdvertising);
+});
+```
+
+```ts tab="TypeScript" title='cmp.ts'
+import { specify } from './lib/specify';
+
+// Adapt this code to your cookie consent management tool
+
+specify.setCookieConsent(cmp.getConsent().targetedAdvertising);
+
+cmp.onConsentChange((consent) => {
+  specify.setCookieConsent(consent.targetedAdvertising);
+});
+```
+
+### Set it before you serve
+
+`serve()` reads consent at the moment you call it, and we only set the cookie on a serve that has consent. So if your consent call always lands after your only serve, the visitor never gets a cookie and is never recognised, on this visit or any other.
+
+Most consent tools can give you a returning visitor's stored answer straight away. Use that at startup instead of waiting for the banner callback.
+
+Nothing else depends on the order. Wallet addresses still work without consent, and `identify()` applies to every serve after it. Calling either one late costs you one ad, not the visitor.
+
+## Serve without a wallet
+
+Once consent is granted, a serve with no address behind it can still fill: Specify resolves the visitor from the cookie alone.
+
+Most placements do not know whether a wallet is connected, and they do not have to. `serve()` accepts `null` in the address position, so one call covers both cases:
+
+```js tab="JavaScript" title='ad-slot.js' tab-group='lang'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+// A connected wallet is used if there is one. If not, the cookie is.
+const ad = await specify.serve(getConnectedWallet() ?? null, {
+  imageFormat: ImageFormat.LONG_BANNER,
+  adUnitId: 'article-footer'
+});
+
+if (ad) render(ad);
+```
+
+```ts tab="TypeScript" title='ad-slot.ts'
+import { specify } from './lib/specify';
+import { ImageFormat } from '@specify-sh/publisher-sdk';
+
+const wallet: `0x${string}` | null = getConnectedWallet();
+
+// A connected wallet is used if there is one. If not, the cookie is.
+const ad = await specify.serve(wallet, {
+  imageFormat: ImageFormat.LONG_BANNER,
+  adUnitId: 'article-footer'
+});
+
+if (ad) render(ad);
+```
+
+Where the placement has no address in scope at all, drop the first argument: `serve({ imageFormat })`.
+
+## Keep passing wallets when you have them
+
+The cookie does not replace wallet addresses, it covers the gap when you have none. Pass them whenever a wallet is connected: each serve that carries one strengthens the link the cookie later resolves.
+
+```js tab="JavaScript" title='wallet.js' tab-group='lang'
+import { specify } from './lib/specify';
+
+// On connect, so every later serve() includes it
+onWalletConnect((address) => specify.identify(address));
+```
+
+```ts tab="TypeScript" title='wallet.ts'
+import { specify } from './lib/specify';
+
+// On connect, so every later serve() includes it
+onWalletConnect((address: `0x${string}`) => specify.identify(address));
+```
+
+See [Consent](sdk-browser#consent) for the full method reference.
+
+## On privacy
+
+Specify sets one cookie, on our own domain. Because it is set while the visitor is on your site rather than ours, it is a third-party cookie.
+
+Without consent we neither read nor set it, and ads still serve against the wallet addresses you pass.
+
+We do not use browser fingerprinting.
+
+---
+
+# Browser SDK
+URL: /publishing/sdk-browser
+
+```npm
+npm i @specify-sh/publisher-sdk
+```
+
+## `new Specify(config)`
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `publisherKey` | yes | Your key, which starts with `spk_` |
+
+Throws `ValidationError` on a malformed key.
+
+## `serve()`
+
+```ts
+serve(options): Promise<SpecifyAd | null>
+serve(addresses, options): Promise<SpecifyAd | null>
+```
+
+Returns an ad, or `null` when there is nothing to show.
+
+`addresses` takes one address or an array of them, up to 50 unique. Anything registered through `identify()` is included either way.
+
+Pass `null` or `undefined` in the address position, or omit it entirely, and Specify tries to resolve the visitor from our cookies alone. That needs consent, and returns `null` without a request if there is neither. A call site with a maybe-connected wallet can therefore stay a single `serve(wallet ?? null, options)` rather than branching.
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `imageFormat` | yes | See [image formats](#image-formats) |
+| `adUnitId` | no | An id of your choosing, so you can compare placements in reporting |
+
+`serve()` never throws for a failed request. A no-fill, an outage on our side and a network error all return `null`, so a bad minute on our infrastructure cannot break your page. It throws only for input it can reject before sending anything. See [errors](#errors).
+
+## `identify(addresses)`
+
+Registers one or more addresses to include in every later `serve()`.
+
+The client keeps the 50 most recently registered addresses. Throws `ValidationError` on a malformed address.
+
+## `onIdentityChange(listener)`
+
+Calls `listener` when the next `serve()` would send something different from the last one. Returns a function that detaches it.
+
+Runs when `identify()` registers an address that was not already there, or `setCookieConsent(true)` grants consent. Withdrawing consent does not run it, because no serve is worth making with less. Several changes in the same tick arrive as one call.
+
+Use it to fill a slot that came back empty:
+
+```ts
+const stop = specify.onIdentityChange(serveAd);
+```
+
+## Consent
+
+Sets and reads the consent signal for Specify's cookie, which recognises returning visitors across every site in our network.
+
+Consent starts `false`. The SDK never stores it, so your consent platform stays the only source of truth and a withdrawal takes effect on the next `serve()`. If you have no consent platform, store the visitor's choice yourself and set it on each page load.
+
+`serve()` reads consent when you call it, and the cookie is only set on a serve that has it. Set consent before your first serve. See [setting it before you serve](returning-visitors#set-it-before-you-serve).
+
+Without consent, ads still serve against the addresses you pass.
+
+## Image formats
+
+<ImageFormats />
+
+Preview each format, and how an ad looks under different configurations, in the [playground](https://playground.specify.sh/).
+
+## `SpecifyAd`
+
+<AdFields />
+
+Link your call-to-action to `ctaUrl` exactly as given.
+
+## Content formatting
+
+`content` supports a small subset of markdown. Everything else is plain text.
+
+<ContentFormatting />
+
+## Errors
+
+`ValidationError` is thrown for invalid input before making a request:
+
+- a publisher key that is not `spk_` followed by 30 characters
+- an address that is not `0x` plus 40 hex characters
+- more than 50 unique addresses in one call
+
+Everything else returns `null`.
+
+```ts
+import { ValidationError } from '@specify-sh/publisher-sdk';
+
+try {
+  const ad = await specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE });
+} catch (error) {
+  if (error instanceof ValidationError) {
+    console.error(error.message);
+  }
+}
+```
+
+---
+
+# Node.js SDK
+URL: /publishing/sdk-server
+
+Serves ads from a server: a route handler, a server component, a background job.
+
+<Callout type="warn" title="Use the browser SDK where you can">
+  Serving from a server costs you signal, and some of it is not recoverable:
+
+  - **No identity cookie**, so a visitor who connected a wallet elsewhere on the network cannot be recognised. You will fill only against the addresses you pass.
+  - **Geolocation doesn't work**, so geofenced / geo-targeted campaigns will not be served correctly.
+
+  Use it when a browser call is genuinely not an option. Otherwise reach for the [Browser SDK](sdk-browser).
+</Callout>
+
+## 1. Install
+
+```npm
+npm install @specify-sh/publisher-sdk
+```
+
+## 2. Serve an ad
+
+```ts title="script.ts"
+import { serve, ImageFormat } from '@specify-sh/publisher-sdk/server';
+
+const ad = await serve({
+  publisherKey: process.env.SPECIFY_PUBLISHER_KEY!,
+  walletAddresses: ['0x1111111111111111111111111111111111111111'],
+  imageFormat: ImageFormat.LANDSCAPE,
+  adUnitId: 'sidebar'
+});
+
+if (ad) {
+  render(ad);
+}
+```
+
+## Options
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `publisherKey` | yes | Your key, `spk_` followed by 30 characters |
+| `walletAddresses` | yes | One to 50 addresses, `0x` plus 40 hex characters |
+| `imageFormat` | yes | `LANDSCAPE`, `LONG_BANNER`, `SHORT_BANNER` or `NO_IMAGE` |
+| `adUnitId` | no | An id of your choosing, so you can compare placements in reporting |
+
+## Image formats and `SpecifyAd`
+
+Identical to the browser SDK: see [image formats](sdk-browser#image-formats) and [`SpecifyAd`](sdk-browser#specifyad). Both entry points return the same shape.
+
+## Errors
+
+ValidationError is thrown for invalid input before making a request:
+
+- a publisher key that is not `spk_` followed by 30 characters
+- an address that is not `0x` plus 40 hex characters
+- an empty address list, or more than 50 unique addresses
+
+Everything else returns null.
+
+```ts
+import { serve, ValidationError } from '@specify-sh/publisher-sdk/server';
+
+try {
+  const ad = await serve({ publisherKey, walletAddresses, imageFormat });
+} catch (error) {
+  if (error instanceof ValidationError) {
+    console.error(error.message);
+  }
+}
+```
