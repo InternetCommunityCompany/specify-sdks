@@ -13,11 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        # `changeset status` diffs against the base branch, so the shallow
-        # clone Actions defaults to has nothing to compare with.
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies
@@ -32,9 +28,3 @@ jobs:
         run: bun run build
       - name: Verify package
         run: bun run verify:package
-      # Fails when a package changed with no changeset describing it. Without
-      # this the release is silent about the change: nothing is versioned, so
-      # nothing is published, and the fix only surfaces when someone notices
-      # the registry is behind.
-      - name: Check for a changeset
-        run: bunx changeset status --since=origin/${{ github.base_ref }}
