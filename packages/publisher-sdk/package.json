@@ -26,6 +26,14 @@
       },
       "default": "./dist/index.js"
     },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "react-server": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.react-server.js"
+      },
+      "default": "./dist/react.js"
+    },
     "./server": {
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
@@ -42,6 +50,14 @@
   },
   "dependencies": {
     "@specify-sh/core": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

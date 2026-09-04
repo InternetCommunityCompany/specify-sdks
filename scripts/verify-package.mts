@@ -146,14 +146,52 @@ try {
   }
   console.log("Verified publisher JavaScript and declarations import core");
 
+  for (const file of [
+    "react.js",
+    "react.js.map",
+    "react.d.ts",
+    "react.react-server.js",
+  ]) {
+    requireFile(publisher.files, `dist/${file}`);
+  }
+  const reactHook = readFileSync(
+    join(publisher.directory, "dist", "react.js"),
+    "utf8"
+  );
+  if (!reactHook.startsWith("'use client'")) {
+    throw new Error(
+      "The packed react.js must open with the use client directive"
+    );
+  }
+  if (!reactHook.includes('from"react"')) {
+    throw new Error("The packed react.js must import react, not bundle it");
+  }
+  if (reactHook.includes("@specify-sh/core")) {
+    throw new Error("The react hook must not bundle a core import");
+  }
+  if (publisher.manifest.peerDependencies?.react !== "^18 || ^19") {
+    throw new Error("Publisher must declare react as an optional peer");
+  }
+  console.log("Verified the react entry keeps its directive and externals");
+
   const consumerDirectory = join(scratch, "consumer");
   mkdirSync(consumerDirectory, { recursive: true });
+  const rootManifest: PackageManifest = JSON.parse(
+    readFileSync("package.json", "utf8")
+  );
+  const reactVersion = rootManifest.devDependencies?.react;
+  const reactTypesVersion = rootManifest.devDependencies?.["@types/react"];
+  if (!(reactVersion && reactTypesVersion)) {
+    throw new Error("The repo devDependencies must pin react and @types/react");
+  }
   writeFileSync(
     join(consumerDirectory, "package.json"),
     JSON.stringify({
       dependencies: {
         "@specify-sh/core": `file:${core.tarball}`,
         "@specify-sh/publisher-sdk": `file:${publisher.tarball}`,
+        "@types/react": reactTypesVersion,
+        react: reactVersion,
       },
       overrides: {
         "@specify-sh/core": `file:${core.tarball}`,
@@ -173,6 +211,7 @@ try {
     `import { type AdRequest, type Address as CoreAddress, assertValidAddresses, assertValidPublisherKey, ImageFormat as CoreImageFormat, type ImageFormat as CoreImageFormatType, MAX_WALLET_ADDRESSES, prepareWalletAddresses, requestAd, type SpecifyAd as CoreSpecifyAd, ValidationError as CoreValidationError, type ValidationError as CoreValidationErrorType } from "@specify-sh/core";
 import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
 import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
+import { useSpecifyAd, type UseSpecifyAdOptions } from "@specify-sh/publisher-sdk/react";
 const coreAddress: CoreAddress = "0x1234567890123456789012345678901234567890";
 const coreImageFormat: CoreImageFormatType = CoreImageFormat.LANDSCAPE;
 const coreRequest: AdRequest = { imageFormat: coreImageFormat, publisherKey: "spk_1234567890abcdef1234567890abcd", walletAddresses: [coreAddress] };
@@ -195,6 +234,13 @@ const serverAddress: ServerAddress = address;
 const serverImageFormat: ServerImageFormatType = ServerImageFormat.LANDSCAPE;
 const serverOptions: ServeOptions = { publisherKey: config.publisherKey, walletAddresses: [serverAddress], imageFormat: serverImageFormat };
 const serverAd: Promise<ServerSpecifyAd | null> = serve(serverOptions);
+const hookOptions: UseSpecifyAdOptions = { adUnitId: "header", imageFormat, specify: client };
+function AdSlot(): SpecifyAd | null {
+  return useSpecifyAd(hookOptions);
+}
+function WalletAdSlot(): SpecifyAd | null {
+  return useSpecifyAd([address], hookOptions);
+}
 function validationMessage(error: unknown): string {
   if (error instanceof ValidationError) {
     const validation: ValidationError = error;
@@ -218,6 +264,8 @@ void unsubscribeIdentity;
 void serverAd;
 void validationMessage;
 void serverValidationMessage;
+void AdSlot;
+void WalletAdSlot;
 `
   );
   writeFileSync(
@@ -275,6 +323,35 @@ if (browser.ValidationError !== core.ValidationError || server.ValidationError !
     throw new Error(`Unexpected react-server guard: ${guardMessage}`);
   }
   console.log("Verified default and react-server conditional resolution");
+
+  execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `import * as reactEntry from "@specify-sh/publisher-sdk/react";
+if (JSON.stringify(Object.keys(reactEntry).sort()) !== JSON.stringify(["useSpecifyAd"])) process.exit(1);
+if (typeof reactEntry.useSpecifyAd !== "function") process.exit(1);`,
+    ],
+    { cwd: consumerDirectory, stdio: "inherit" }
+  );
+
+  const reactGuardMessage = execFileSync(
+    "node",
+    [
+      "--conditions=react-server",
+      "-e",
+      'import("@specify-sh/publisher-sdk/react").then(() => process.exit(1)).catch((error) => { console.log(error.message); })',
+    ],
+    { cwd: consumerDirectory, encoding: "utf8" }
+  ).trim();
+  if (
+    reactGuardMessage !==
+    '@specify-sh/publisher-sdk/react can only be imported from a Client Component. Add "use client" to the component that calls useSpecifyAd(), or import { serve } from "@specify-sh/publisher-sdk/server" to serve during server rendering.'
+  ) {
+    throw new Error(`Unexpected react-server guard: ${reactGuardMessage}`);
+  }
+  console.log("Verified react subpath resolution under both conditions");
 } finally {
   rmSync(scratch, { force: true, recursive: true });
 }
