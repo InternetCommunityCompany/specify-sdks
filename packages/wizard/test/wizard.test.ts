@@ -6,7 +6,6 @@ import { dirname, join, resolve } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { AgentConversation, AgentSeam, DetectedAgent } from "../src/agent";
-import type { IntegrationPlan } from "../src/plan";
 import { runWizard } from "../src/wizard";
 
 const AGENT: DetectedAgent = {
@@ -16,21 +15,48 @@ const AGENT: DetectedAgent = {
   version: "1.2.3",
 };
 const KEY_PROMPT = "Paste your publisher key";
+const PLACEMENT_PROMPT = "Which of these placements";
 const REVIEW_PROMPT = "Go ahead with this plan?";
 const FEEDBACK_PROMPT = "What should the agent do differently?";
 const ENTER = "\r";
 const DOWN = "\u001B[B";
+const SPACE = " ";
+const HERO = "`app/page.tsx` - the hero, above the fold";
+const SIDEBAR = "`app/blog/page.tsx` - between the list and the footer";
+const PLAN = `## What I found
+
+A Next.js app with the App Router, TypeScript and pnpm.
+
+## What I will change
+
+- Create lib/specify.ts with the shared client.
+- Add NEXT_PUBLIC_SPECIFY_PUBLISHER_KEY to .env.local.
+
+## Placements
+
+- ${HERO}
+- ${SIDEBAR}
+
+## Notes
+
+Cookiebot already handles consent in app/layout.tsx.`;
+const PLAN_WITHOUT_PLACEMENTS = `## What I found
+
+A plain JavaScript site built with esbuild.
+
+## What I will change
+
+- Add the shared client to src/specify.js.`;
 const TEST_TIMEOUT = 20_000;
 
 const directories: string[] = [];
-let docs: { full: string; index: string };
+let index: string;
 
 beforeAll(async () => {
-  const [index, full] = await Promise.all([
-    readFile(resolve("packages/wizard/test/fixtures/llms.txt"), "utf8"),
-    readFile(resolve("packages/wizard/test/fixtures/llms-full.txt"), "utf8"),
-  ]);
-  docs = { full, index };
+  index = await readFile(
+    resolve("packages/wizard/test/fixtures/llms.txt"),
+    "utf8"
+  );
 });
 
 afterEach(() => {
@@ -94,11 +120,11 @@ function terminal() {
         fail(new Error(`Never saw "${marker}". Captured:\n${captured}`));
       }, 10_000);
       function check() {
-        const index = captured.indexOf(marker, cursor);
-        if (index === -1) {
+        const found = captured.indexOf(marker, cursor);
+        if (found === -1) {
           return;
         }
-        cursor = index + marker.length;
+        cursor = found + marker.length;
         clearTimeout(timer);
         waiters.delete(check);
         done();
@@ -128,7 +154,7 @@ interface FakeSeam extends AgentSeam {
 function fakeSeam(options: {
   agents?: DetectedAgent[];
   onWork?: () => void;
-  plans?: IntegrationPlan[];
+  plans?: string[];
 }): FakeSeam {
   const plans = [...(options.plans ?? [])];
   const asks: string[] = [];
@@ -143,7 +169,7 @@ function fakeSeam(options: {
         ask: (prompt) => {
           asks.push(prompt);
           const plan = plans.shift();
-          if (!plan) {
+          if (plan === undefined) {
             throw new Error("The fake agent ran out of plans");
           }
           return Promise.resolve(plan);
@@ -161,61 +187,11 @@ function fakeSeam(options: {
   return seam;
 }
 
-function planFixture(
-  overrides: Partial<IntegrationPlan> = {}
-): IntegrationPlan {
-  return {
-    changes: [
-      {
-        action: "create",
-        path: "lib/specify.ts",
-        summary: "Creates the shared Specify client",
-      },
-      {
-        action: "modify",
-        path: "app/page.tsx",
-        summary: "Renders the hero ad slot",
-      },
-    ],
-    clientModule: {
-      path: "lib/specify.ts",
-      reason: "Every page imports from lib",
-    },
-    consent: {
-      decisionSite: "app/layout.tsx",
-      platform: "Cookiebot",
-      present: true,
-    },
-    envFile: {
-      path: ".env.local",
-      variable: "NEXT_PUBLIC_SPECIFY_PUBLISHER_KEY",
-    },
-    framework: "nextjs",
-    frameworkNotes: "App Router",
-    packageManager: "pnpm",
-    placements: [
-      {
-        adUnitId: "home-hero",
-        file: "app/page.tsx",
-        imageFormat: "LANDSCAPE",
-        reason: "Above the fold",
-      },
-    ],
-    typescript: true,
-    wallets: {
-      connected: true,
-      connectionSite: "components/connect.tsx",
-      library: "wagmi",
-    },
-    ...overrides,
-  };
-}
-
-function docsFetch(): typeof fetch {
-  return ((url: string) =>
-    Promise.resolve(
-      new Response(url.endsWith("llms-full.txt") ? docs.full : docs.index)
-    )) as unknown as typeof fetch;
+function docsFetch(urls: string[] = []): typeof fetch {
+  return ((url: string) => {
+    urls.push(String(url));
+    return Promise.resolve(new Response(index));
+  }) as unknown as typeof fetch;
 }
 
 describe("runWizard", () => {
@@ -223,35 +199,39 @@ describe("runWizard", () => {
     "plans, implements and reports the changes",
     async () => {
       const cwd = repository();
+      const urls: string[] = [];
       const seam = fakeSeam({
         onWork: () => {
           mkdirSync(dirname(join(cwd, "lib/specify.ts")), { recursive: true });
           writeFileSync(join(cwd, "lib/specify.ts"), "// client\n");
         },
-        plans: [planFixture()],
+        plans: [PLAN],
       });
       const script = terminal();
 
       const exitCode = runWizard({
         cwd,
-        fetchImpl: docsFetch(),
+        fetchImpl: docsFetch(urls),
         input: script.input,
         output: script.output,
         seam,
       });
       await script.type(KEY_PROMPT, `spk_live_pasted_key${ENTER}`);
+      await script.type(PLACEMENT_PROMPT, ENTER);
       await script.type(REVIEW_PROMPT, ENTER);
 
       await expect(exitCode).resolves.toBe(0);
+      expect(urls).toEqual(["https://docs.specify.sh/llms.txt"]);
       expect(seam.conversations).toBe(1);
       expect(seam.asks).toHaveLength(1);
-      expect(seam.asks[0]).toContain("reads and reports only");
+      expect(seam.asks[0]).toContain("This turn reports");
+      expect(seam.asks[0]).toContain("[Next.js](/publishing/nextjs)");
       expect(seam.works).toHaveLength(1);
       expect(seam.works[0]).toContain("spk_live_pasted_key");
-      expect(seam.works[0]).toContain("<specify-api-reference>");
-      expect(seam.works[0]).toContain("/publishing/nextjs");
+      expect(seam.works[0]).toContain("<specify-docs-index>");
+      expect(seam.works[0]).toContain("## What I found");
       expect(seam.works[0]).toContain("Do not commit");
-      expect(seam.works[0]).toContain('"adUnitId": "home-hero"');
+      expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
       expect(script.text()).toContain("Using Codex 1.2.3");
       expect(script.text()).toContain("Nothing has been changed yet.");
       expect(script.text()).toContain("lib/specify.ts");
@@ -261,16 +241,144 @@ describe("runWizard", () => {
   );
 
   it(
+    "builds the placements the developer kept and names the ones they dropped",
+    async () => {
+      const seam = fakeSeam({ plans: [PLAN] });
+      const script = terminal();
+
+      const exitCode = runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        input: script.input,
+        output: script.output,
+        seam,
+      });
+      await script.type(KEY_PROMPT, ENTER);
+      await script.type(PLACEMENT_PROMPT, `${DOWN}${SPACE}${ENTER}`);
+      await script.type(REVIEW_PROMPT, ENTER);
+
+      await expect(exitCode).resolves.toBe(0);
+      expect(seam.works).toHaveLength(1);
+      expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
+      expect(seam.works[0]).toContain(`Do not add them:\n- ${SIDEBAR}`);
+      expect(script.text()).toContain("Which of these placements");
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
+    "still implements when the developer keeps no placement at all",
+    async () => {
+      const seam = fakeSeam({ plans: [PLAN] });
+      const script = terminal();
+
+      const exitCode = runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        input: script.input,
+        output: script.output,
+        seam,
+      });
+      await script.type(KEY_PROMPT, ENTER);
+      await script.type(PLACEMENT_PROMPT, `${SPACE}${DOWN}${SPACE}${ENTER}`);
+      await script.type(REVIEW_PROMPT, ENTER);
+
+      await expect(exitCode).resolves.toBe(0);
+      expect(seam.works).toHaveLength(1);
+      expect(seam.works[0]).toContain(
+        "wants none of the placements you proposed"
+      );
+      expect(seam.works[0]).toContain(`Do not add them:\n- ${HERO}`);
+      expect(seam.works[0]).toContain(SIDEBAR);
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
+    "skips the picker when the plan proposes no placements",
+    async () => {
+      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+      const script = terminal();
+
+      const exitCode = runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        input: script.input,
+        output: script.output,
+        seam,
+      });
+      await script.type(KEY_PROMPT, ENTER);
+      await script.type(REVIEW_PROMPT, ENTER);
+
+      await expect(exitCode).resolves.toBe(0);
+      expect(script.text()).not.toContain("Which of these placements");
+      expect(seam.works).toHaveLength(1);
+      expect(seam.works[0]).toContain("built with esbuild");
+      expect(seam.works[0]).not.toContain("Build these and no others");
+      expect(seam.works[0]).not.toContain("Do not add them");
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
+    "asks once more when the agent replies with nothing",
+    async () => {
+      const seam = fakeSeam({ plans: ["  \n", PLAN_WITHOUT_PLACEMENTS] });
+      const script = terminal();
+
+      const exitCode = runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        input: script.input,
+        output: script.output,
+        seam,
+      });
+      await script.type(KEY_PROMPT, ENTER);
+      await script.type(REVIEW_PROMPT, ENTER);
+
+      await expect(exitCode).resolves.toBe(0);
+      expect(seam.conversations).toBe(1);
+      expect(seam.asks).toHaveLength(2);
+      expect(seam.asks[0]).toBe(seam.asks[1]);
+      expect(seam.works).toHaveLength(1);
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
+    "stops without changing anything when both replies are empty",
+    async () => {
+      const seam = fakeSeam({ plans: ["", ""] });
+      const script = terminal();
+
+      const exitCode = runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        input: script.input,
+        output: script.output,
+        seam,
+      });
+      await script.type(KEY_PROMPT, ENTER);
+
+      await expect(exitCode).resolves.toBe(1);
+      expect(seam.asks).toHaveLength(2);
+      expect(seam.works).toEqual([]);
+      expect(script.text()).toContain("replied with nothing, twice");
+      expect(script.text()).toContain(
+        "https://docs.specify.sh/publishing/get-started"
+      );
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
     "sends feedback back to the same conversation",
     async () => {
-      const seam = fakeSeam({
-        plans: [
-          planFixture(),
-          planFixture({
-            clientModule: { path: "src/ads.ts", reason: "Asked" },
-          }),
-        ],
-      });
+      const revised = PLAN_WITHOUT_PLACEMENTS.replace(
+        "src/specify.js",
+        "src/ads.js"
+      );
+      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS, revised] });
       const script = terminal();
 
       const exitCode = runWizard({
@@ -284,16 +392,16 @@ describe("runWizard", () => {
       await script.type(REVIEW_PROMPT, `${DOWN}${ENTER}`);
       await script.type(
         FEEDBACK_PROMPT,
-        `Put the client in src/ads.ts${ENTER}`
+        `Put the client in src/ads.js${ENTER}`
       );
       await script.type(REVIEW_PROMPT, ENTER);
 
       await expect(exitCode).resolves.toBe(0);
       expect(seam.conversations).toBe(1);
       expect(seam.asks).toHaveLength(2);
-      expect(seam.asks[1]).toContain("Put the client in src/ads.ts");
-      expect(seam.works[0]).toContain('"path": "src/ads.ts"');
-      expect(script.text()).toContain("src/ads.ts");
+      expect(seam.asks[1]).toContain("Put the client in src/ads.js");
+      expect(seam.works[0]).toContain("src/ads.js");
+      expect(script.text()).toContain("src/ads.js");
     },
     TEST_TIMEOUT
   );
@@ -301,7 +409,7 @@ describe("runWizard", () => {
   it(
     "changes nothing when the plan is aborted",
     async () => {
-      const seam = fakeSeam({ plans: [planFixture()] });
+      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
       const script = terminal();
 
       const exitCode = runWizard({
@@ -324,7 +432,7 @@ describe("runWizard", () => {
   it(
     "uses the placeholder key when the key is skipped",
     async () => {
-      const seam = fakeSeam({ plans: [planFixture()] });
+      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
       const script = terminal();
 
       const exitCode = runWizard({
@@ -349,7 +457,7 @@ describe("runWizard", () => {
   it(
     "stops when the developer declines a dirty working tree",
     async () => {
-      const seam = fakeSeam({ plans: [planFixture()] });
+      const seam = fakeSeam({ plans: [PLAN] });
       const script = terminal();
 
       const exitCode = runWizard({
@@ -372,7 +480,7 @@ describe("runWizard", () => {
   it(
     "warns that a directory outside Git leaves no diff to review",
     async () => {
-      const seam = fakeSeam({ plans: [planFixture()] });
+      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
       const script = terminal();
 
       const exitCode = runWizard({
@@ -395,6 +503,35 @@ describe("runWizard", () => {
   );
 
   it(
+    "says when the chosen agent cannot be held to reading only",
+    async () => {
+      const seam = fakeSeam({
+        agents: [
+          { id: "antigravity", name: "Antigravity", supportsReadOnly: false },
+        ],
+        plans: [PLAN_WITHOUT_PLACEMENTS],
+      });
+      const script = terminal();
+
+      const exitCode = runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        input: script.input,
+        output: script.output,
+        seam,
+      });
+      await script.type(KEY_PROMPT, ENTER);
+      await script.type(REVIEW_PROMPT, ENTER);
+
+      await expect(exitCode).resolves.toBe(0);
+      expect(script.text()).toContain(
+        "Antigravity cannot be held to reading only"
+      );
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
     "asks the developer which agent to use when several are installed",
     async () => {
       const seam = fakeSeam({
@@ -402,7 +539,7 @@ describe("runWizard", () => {
           AGENT,
           { id: "claude", name: "Claude Code", supportsReadOnly: false },
         ],
-        plans: [planFixture()],
+        plans: [PLAN_WITHOUT_PLACEMENTS],
       });
       const script = terminal();
 
@@ -449,7 +586,7 @@ describe("runWizard", () => {
   it(
     "stops before the first turn when the documentation cannot be fetched",
     async () => {
-      const seam = fakeSeam({ plans: [planFixture()] });
+      const seam = fakeSeam({ plans: [PLAN] });
       const script = terminal();
 
       const exitCode = runWizard({

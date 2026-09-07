@@ -1,105 +1,46 @@
-import type { IntegrationPlan } from "./plan";
-
-const FRAMEWORK_LABELS = {
-  nextjs: "Next.js",
-  other: "Other",
-  react: "React",
-  vanilla: "Vanilla JavaScript",
-} as const satisfies Record<IntegrationPlan["framework"], string>;
-
-const LABEL_WIDTH = 12;
-const SUMMARY_INDENT = 10;
-// Wide enough to read, narrow enough that an 80-column terminal renders the
-// note without rewrapping and losing the indent under each label.
+// Wide enough to read, narrow enough that an 80-column terminal renders a
+// clack note without rewrapping it and losing the shape of the markdown.
 const BODY_WIDTH = 64;
+// A nested list item can be indented far enough that the remaining width
+// would leave a column too narrow to read.
+const MIN_WIDTH = 24;
+const LEADING_SPACE = /^\s*/;
+const LIST_MARKER = /^\s*[-*+]\s+/;
 const WHITESPACE = /\s+/;
 
-function wrap(value: string, width: number): string[] {
+function wrap(line: string): string[] {
+  // A wrapped list item hangs under its own text, not under its bullet.
+  const marker =
+    line.match(LIST_MARKER)?.[0] ?? line.match(LEADING_SPACE)?.[0] ?? "";
+  const words = line.slice(marker.length).split(WHITESPACE).filter(Boolean);
+  if (words.length === 0) {
+    return [""];
+  }
+  const width = Math.max(BODY_WIDTH - marker.length, MIN_WIDTH);
   const lines: string[] = [];
-  let line = "";
-  for (const word of value.split(WHITESPACE).filter(Boolean)) {
-    if (line && `${line} ${word}`.length > width) {
-      lines.push(line);
-      line = word;
+  let current = "";
+  for (const word of words) {
+    if (current && `${current} ${word}`.length > width) {
+      lines.push(current);
+      current = word;
     } else {
-      line = line ? `${line} ${word}` : word;
+      current = current ? `${current} ${word}` : word;
     }
   }
-  lines.push(line);
-  return lines;
-}
-
-function indented(first: string, value: string, indent: number): string[] {
-  const padding = " ".repeat(indent);
-  return wrap(value, BODY_WIDTH - indent).map((line, index) =>
-    index === 0 ? `${first.padEnd(indent)}${line}` : `${padding}${line}`
+  lines.push(current);
+  const continuation = " ".repeat(marker.length);
+  return lines.map(
+    (text, index) => `${index === 0 ? marker : continuation}${text}`
   );
-}
-
-function row(label: string, value: string): string[] {
-  return indented(label, value, LABEL_WIDTH);
-}
-
-function describeConsent(plan: IntegrationPlan): string {
-  const { decisionSite, platform, present } = plan.consent;
-  if (!present) {
-    return "None found, so consent is never set";
-  }
-  const site = decisionSite ? `, decided in ${decisionSite}` : "";
-  return `${platform ?? "A consent platform"}${site}`;
-}
-
-function describeWallets(plan: IntegrationPlan): string {
-  const { connected, connectionSite, library } = plan.wallets;
-  if (!connected) {
-    return "None found";
-  }
-  const site = connectionSite ? `, connected in ${connectionSite}` : "";
-  return `${library ?? "A wallet connection"}${site}`;
-}
-
-function placementLines(plan: IntegrationPlan): string[] {
-  if (plan.placements.length === 0) {
-    return ["  None proposed"];
-  }
-  return plan.placements.map(
-    ({ adUnitId, file, imageFormat }) =>
-      `  ${file}, ${imageFormat}, ${adUnitId}`
-  );
-}
-
-function changeLines(plan: IntegrationPlan): string[] {
-  return plan.changes.flatMap(({ action, path, summary }) => [
-    `  ${action}  ${path}`,
-    ...indented("", summary, SUMMARY_INDENT),
-  ]);
 }
 
 /**
  * The plan as the developer reads it before approving anything.
  *
- * @param plan The plan the agent reported.
- * @returns The body for a `note()`, one screen of plain text.
+ * @param plan The plan markdown the agent replied with.
+ * @returns The body for a `note()`, with long lines folded under their own
+ * indent.
  */
-export function renderPlan(plan: IntegrationPlan): string {
-  const language = plan.typescript ? "TypeScript" : "JavaScript";
-  return [
-    ...row(
-      "Framework",
-      `${FRAMEWORK_LABELS[plan.framework]}, ${language}, ${plan.packageManager}`
-    ),
-    ...(plan.frameworkNotes ? row("Notes", plan.frameworkNotes) : []),
-    ...row("Client", plan.clientModule.path),
-    ...row("Env", `${plan.envFile.path}, ${plan.envFile.variable}`),
-    ...row("Consent", describeConsent(plan)),
-    ...row("Wallets", describeWallets(plan)),
-    "",
-    "Placements",
-    ...placementLines(plan),
-    "",
-    "Files to change",
-    ...changeLines(plan),
-    "",
-    "Nothing has been changed yet.",
-  ].join("\n");
+export function renderPlan(plan: string): string {
+  return plan.trim().split("\n").flatMap(wrap).join("\n");
 }

@@ -23,11 +23,7 @@ export interface TurnOptions {
 }
 
 export interface AgentConversation {
-  ask: (
-    prompt: string,
-    schema: Record<string, unknown>,
-    opts?: TurnOptions
-  ) => Promise<unknown>;
+  ask: (prompt: string, opts?: TurnOptions) => Promise<string>;
   close: () => Promise<void>;
   work: (prompt: string, opts?: TurnOptions) => Promise<string>;
 }
@@ -76,15 +72,14 @@ function conversation(
   supportsReadOnly: boolean
 ): AgentConversation {
   return {
-    async ask(prompt, schema, opts) {
+    async ask(prompt, opts) {
       try {
         const run = session.run(prompt, {
-          schema,
           signal: opts?.signal,
           ...(supportsReadOnly ? { readOnly: opts?.readOnly } : {}),
         });
         const result = await finishRun(run, session, opts?.onActivity);
-        return result.json;
+        return result.text;
       } catch (error) {
         throw publicError(TURN_ERROR, error);
       }

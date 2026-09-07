@@ -39,14 +39,14 @@ describe("anyAgentSeam", () => {
     mocks.detect.mockReset();
   });
 
-  it("maps detection and streams activity from a structured turn", async () => {
+  it("maps detection and streams activity from a read-only turn", async () => {
     const runMock = vi.fn(() =>
       run(
         [
           { name: "read", type: "tool-call" },
           { kind: "modify", path: "src/app.ts", type: "file-change" },
         ],
-        { json: { framework: "react" }, text: "" }
+        { json: null, text: "## What I found\n\nA React app.\n" }
       )
     );
     const session = {
@@ -76,19 +76,14 @@ describe("anyAgentSeam", () => {
     const activities: AgentActivity[] = [];
     const conversation = seam.open(detected, "/project");
     await expect(
-      conversation.ask(
-        "inspect",
-        { type: "object" },
-        {
-          onActivity: (activity) => activities.push(activity),
-          readOnly: true,
-        }
-      )
-    ).resolves.toEqual({ framework: "react" });
+      conversation.ask("inspect", {
+        onActivity: (activity) => activities.push(activity),
+        readOnly: true,
+      })
+    ).resolves.toBe("## What I found\n\nA React app.\n");
     expect(agent.session).toHaveBeenCalledWith({ cwd: "/project" });
     expect(runMock).toHaveBeenCalledWith("inspect", {
       readOnly: true,
-      schema: { type: "object" },
       signal: undefined,
     });
     expect(activities).toEqual([
@@ -153,12 +148,9 @@ describe("anyAgentSeam", () => {
       throw new Error("Expected one detected agent");
     }
 
-    await seam
-      .open(detected, "/project")
-      .ask("inspect", {}, { readOnly: true });
+    await seam.open(detected, "/project").ask("inspect", { readOnly: true });
 
     expect(session.run).toHaveBeenCalledWith("inspect", {
-      schema: {},
       signal: undefined,
     });
   });

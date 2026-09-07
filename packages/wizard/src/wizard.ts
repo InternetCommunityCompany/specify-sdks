@@ -5,6 +5,7 @@ import {
   intro,
   isCancel,
   log,
+  multiselect,
   note,
   outro,
   select,
@@ -17,12 +18,8 @@ import type {
   AgentSeam,
   DetectedAgent,
 } from "./agent";
-import { fetchReference, type RawDocs, selectPages } from "./docs";
-import {
-  type IntegrationPlan,
-  integrationPlanSchema,
-  parseIntegrationPlan,
-} from "./plan";
+import { fetchDocsIndex } from "./docs";
+import { type ChosenPlacements, parsePlacements } from "./placements";
 import {
   inspectWorkingTree,
   summarizeChanges,
@@ -70,6 +67,12 @@ interface TurnContext {
   conversation: AgentConversation;
   io: WizardIo;
   signal: AbortSignal | undefined;
+}
+
+/** A plan the developer approved, with the placements they kept. */
+interface ApprovedPlan {
+  placements: ChosenPlacements;
+  plan: string;
 }
 
 /** A stop the developer asked for. It ends the run at exit code 0. */
@@ -146,11 +149,7 @@ async function confirmTree(tree: TreeState, io: WizardIo): Promise<void> {
 }
 
 async function askPublisherKey(io: WizardIo): Promise<string> {
-  note(
-    `Copy a publisher key from ${PUBLISHER_KEYS_URL}\nThe link signs you in on the way, so it works from a signed-out browser.`,
-    "Publisher key",
-    io
-  );
+  note(`Copy a publisher key from ${PUBLISHER_KEYS_URL}`, "Publisher key", io);
   const answer = answered(
     await text({
       defaultValue: "",
@@ -196,10 +195,10 @@ async function runTurn<Result>(
   }
 }
 
-async function planTurn(
+async function askForPlan(
   context: TurnContext,
   prompt: string
-): Promise<IntegrationPlan> {
+): Promise<string> {
   const reply = await runTurn(
     context,
     {
@@ -208,27 +207,60 @@ async function planTurn(
       start: "Reading the project",
     },
     (onActivity) =>
-      context.conversation.ask(prompt, integrationPlanSchema, {
+      context.conversation.ask(prompt, {
         onActivity,
         readOnly: context.agent.supportsReadOnly,
         signal: context.signal,
       })
   );
-  try {
-    return parseIntegrationPlan(reply);
-  } catch (error) {
-    throw new Error(
-      `${describeAgent(context.agent)} did not return a plan we can read. Run the wizard again, or set the SDK up by hand: ${PUBLISHER_GUIDE}`,
-      { cause: error }
-    );
+  return reply.trim();
+}
+
+/** An empty reply is worth one more ask before the run is a write-off. */
+async function planTurn(context: TurnContext, prompt: string): Promise<string> {
+  const plan = await askForPlan(context, prompt);
+  if (plan) {
+    return plan;
   }
+  const retried = await askForPlan(context, prompt);
+  if (retried) {
+    return retried;
+  }
+  throw new Error(
+    `${describeAgent(context.agent)} replied with nothing, twice. Run the wizard again, or set the SDK up by hand: ${PUBLISHER_GUIDE}`
+  );
+}
+
+async function choosePlacements(
+  plan: string,
+  io: WizardIo
+): Promise<ChosenPlacements> {
+  const suggested = parsePlacements(plan);
+  if (suggested.length === 0) {
+    return { dropped: [], kept: [] };
+  }
+  const kept = answered(
+    await multiselect<string>({
+      initialValues: suggested,
+      message: "Which of these placements should the agent build?",
+      options: suggested.map((label) => ({ label, value: label })),
+      required: false,
+      ...io,
+    })
+  );
+  return { dropped: suggested.filter((label) => !kept.includes(label)), kept };
 }
 
 async function approvePlan(
   context: TurnContext,
-  plan: IntegrationPlan
-): Promise<IntegrationPlan> {
-  note(renderPlan(plan), "Integration plan", context.io);
+  plan: string
+): Promise<ApprovedPlan> {
+  note(
+    `${renderPlan(plan)}\n\nNothing has been changed yet.`,
+    "Integration plan",
+    context.io
+  );
+  const placements = await choosePlacements(plan, context.io);
   const decision = answered(
     await select({
       message: "Go ahead with this plan?",
@@ -241,7 +273,7 @@ async function approvePlan(
     })
   );
   if (decision === "approve") {
-    return plan;
+    return { placements, plan };
   }
   if (decision === "abort") {
     throw new WizardStop("Aborted. Nothing was changed.");
@@ -261,17 +293,10 @@ async function approvePlan(
 
 async function implement(
   context: TurnContext,
-  plan: IntegrationPlan,
+  approved: ApprovedPlan,
   publisherKey: string,
-  docs: RawDocs
+  index: string
 ): Promise<void> {
-  const reference = selectPages(docs, plan.framework, plan.wallets.connected);
-  if (reference.missing.length > 0) {
-    log.warn(
-      `The agent works without these reference pages, which the docs did not return: ${reference.missing.join(", ")}`,
-      context.io
-    );
-  }
   await runTurn(
     context,
     {
@@ -281,7 +306,12 @@ async function implement(
     },
     (onActivity) =>
       context.conversation.work(
-        implementPrompt(plan, publisherKey, reference),
+        implementPrompt({
+          index,
+          placements: approved.placements,
+          plan: approved.plan,
+          publisherKey,
+        }),
         { onActivity, signal: context.signal }
       )
   );
@@ -332,21 +362,27 @@ async function wizard(options: WizardOptions, io: WizardIo): Promise<number> {
   }
 
   const agent = await chooseAgent(agents, io);
+  if (!agent.supportsReadOnly) {
+    log.warn(
+      `${describeAgent(agent)} cannot be held to reading only, so it may change files while it reads your project.`,
+      io
+    );
+  }
   const tree = await inspectWorkingTree(cwd);
   await confirmTree(tree, io);
   const publisherKey = await askPublisherKey(io);
   // Before the first turn, so a network failure costs nothing. A turn that
   // runs without the current API costs minutes and integrates the wrong thing.
-  const docs = await fetchReference(fetchImpl);
+  const index = await fetchDocsIndex(fetchImpl);
 
   const conversation = seam.open(agent, cwd);
   const context: TurnContext = { agent, conversation, io, signal };
   try {
-    const plan = await approvePlan(
+    const approved = await approvePlan(
       context,
-      await planTurn(context, reconPrompt())
+      await planTurn(context, reconPrompt(index))
     );
-    await implement(context, plan, publisherKey, docs);
+    await implement(context, approved, publisherKey, index);
   } finally {
     await closeQuietly(conversation, io);
   }
