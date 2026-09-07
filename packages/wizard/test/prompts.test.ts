@@ -15,14 +15,15 @@ describe("reconPrompt", () => {
     const prompt = reconPrompt(INDEX);
 
     expect(prompt).toContain(INDEX);
-    expect(prompt).toContain("Fetch the pages you judge relevant");
+    expect(prompt).toContain("https://docs.specify.sh/publishing/nextjs.md");
     expect(prompt).toContain("## Placements");
     expect(prompt).toContain("a suggestion, not a requirement");
     expect(prompt).toContain("Reply with markdown and nothing else.");
-    expect(prompt).toContain("This turn reports, it does not change");
     expect(prompt).toContain("Propose placements rather than settling them");
+    expect(prompt).toContain(
+      "create, change, delete and install nothing until the developer has approved"
+    );
     expect(prompt).not.toContain("schema");
-    expect(prompt).not.toContain("Do not create, change or delete a file");
   });
 });
 
@@ -32,8 +33,8 @@ describe("feedbackPrompt", () => {
 
     expect(prompt).toContain("<feedback>\nPut the client in src/ads.ts\n");
     expect(prompt).toContain("complete updated plan in markdown");
+    expect(prompt).toContain("create, change, delete and install nothing yet");
     expect(prompt).not.toContain("schema");
-    expect(prompt).not.toContain("Do not create, change or delete a file");
   });
 });
 

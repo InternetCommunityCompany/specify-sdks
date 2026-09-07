@@ -39,7 +39,7 @@ describe("anyAgentSeam", () => {
     mocks.detect.mockReset();
   });
 
-  it("maps detection and streams activity from a read-only turn", async () => {
+  it("maps detection and streams activity from a turn", async () => {
     const runMock = vi.fn(() =>
       run(
         [
@@ -57,7 +57,7 @@ describe("anyAgentSeam", () => {
     };
     const agent = {
       session: vi.fn(() => session),
-      supports: vi.fn((capability) => capability === "readOnly"),
+      supports: vi.fn(() => false),
     };
     mocks.detect.mockResolvedValue([detectedResult]);
     mocks.create.mockReturnValue(agent);
@@ -67,7 +67,6 @@ describe("anyAgentSeam", () => {
     expect(detected).toEqual({
       id: "codex",
       name: "Codex",
-      supportsReadOnly: true,
       version: "1.2.3",
     });
     if (!detected) {
@@ -78,14 +77,10 @@ describe("anyAgentSeam", () => {
     await expect(
       conversation.ask("inspect", {
         onActivity: (activity) => activities.push(activity),
-        readOnly: true,
       })
     ).resolves.toBe("## What I found\n\nA React app.\n");
     expect(agent.session).toHaveBeenCalledWith({ cwd: "/project" });
-    expect(runMock).toHaveBeenCalledWith("inspect", {
-      readOnly: true,
-      signal: undefined,
-    });
+    expect(runMock).toHaveBeenCalledWith("inspect", { signal: undefined });
     expect(activities).toEqual([
       { kind: "tool", name: "read" },
       { change: "modify", kind: "file", path: "src/app.ts" },
@@ -130,7 +125,7 @@ describe("anyAgentSeam", () => {
     });
   });
 
-  it("does not send readOnly to an agent that cannot guarantee it", async () => {
+  it("never asks an agent to hold a turn to reading only", async () => {
     const session = {
       close: vi.fn(),
       respond: vi.fn(),
@@ -140,19 +135,22 @@ describe("anyAgentSeam", () => {
     mocks.detect.mockResolvedValue([detectedResult]);
     mocks.create.mockReturnValue({
       session: vi.fn(() => session),
-      supports: vi.fn(() => false),
+      supports: vi.fn(() => true),
     });
     const seam = anyAgentSeam();
     const [detected] = await seam.detect();
     if (!detected) {
       throw new Error("Expected one detected agent");
     }
+    const conversation = seam.open(detected, "/project");
 
-    await seam.open(detected, "/project").ask("inspect", { readOnly: true });
+    await conversation.ask("inspect");
+    await conversation.work("implement");
 
-    expect(session.run).toHaveBeenCalledWith("inspect", {
-      signal: undefined,
-    });
+    expect(session.run.mock.calls).toEqual([
+      ["inspect", { signal: undefined }],
+      ["implement", { signal: undefined }],
+    ]);
   });
 
   it("replaces upstream failures with actionable errors", async () => {

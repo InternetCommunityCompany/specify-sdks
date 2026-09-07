@@ -209,7 +209,6 @@ async function askForPlan(
     (onActivity) =>
       context.conversation.ask(prompt, {
         onActivity,
-        readOnly: context.agent.supportsReadOnly,
         signal: context.signal,
       })
   );
@@ -362,12 +361,6 @@ async function wizard(options: WizardOptions, io: WizardIo): Promise<number> {
   }
 
   const agent = await chooseAgent(agents, io);
-  if (!agent.supportsReadOnly) {
-    log.warn(
-      `${describeAgent(agent)} cannot be held to reading only, so it may change files while it reads your project.`,
-      io
-    );
-  }
   const tree = await inspectWorkingTree(cwd);
   await confirmTree(tree, io);
   const publisherKey = await askPublisherKey(io);

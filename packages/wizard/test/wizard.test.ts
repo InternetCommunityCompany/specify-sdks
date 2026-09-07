@@ -11,7 +11,6 @@ import { runWizard } from "../src/wizard";
 const AGENT: DetectedAgent = {
   id: "codex",
   name: "Codex",
-  supportsReadOnly: true,
   version: "1.2.3",
 };
 const KEY_PROMPT = "Paste your publisher key";
@@ -503,42 +502,10 @@ describe("runWizard", () => {
   );
 
   it(
-    "says when the chosen agent cannot be held to reading only",
-    async () => {
-      const seam = fakeSeam({
-        agents: [
-          { id: "antigravity", name: "Antigravity", supportsReadOnly: false },
-        ],
-        plans: [PLAN_WITHOUT_PLACEMENTS],
-      });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(script.text()).toContain(
-        "Antigravity cannot be held to reading only"
-      );
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
     "asks the developer which agent to use when several are installed",
     async () => {
       const seam = fakeSeam({
-        agents: [
-          AGENT,
-          { id: "claude", name: "Claude Code", supportsReadOnly: false },
-        ],
+        agents: [AGENT, { id: "claude", name: "Claude Code" }],
         plans: [PLAN_WITHOUT_PLACEMENTS],
       });
       const script = terminal();

@@ -4,7 +4,6 @@ import type { DetectResult, Session } from "anyagent-js/types";
 export interface DetectedAgent {
   id: string;
   name: string;
-  supportsReadOnly: boolean;
   version?: string;
 }
 
@@ -18,13 +17,14 @@ export type AgentActivity =
 
 export interface TurnOptions {
   onActivity?: (activity: AgentActivity) => void;
-  readOnly?: boolean;
   signal?: AbortSignal;
 }
 
 export interface AgentConversation {
+  /** A turn whose reply the wizard reads. */
   ask: (prompt: string, opts?: TurnOptions) => Promise<string>;
   close: () => Promise<void>;
+  /** A turn that changes the project. */
   work: (prompt: string, opts?: TurnOptions) => Promise<string>;
 }
 
@@ -67,23 +67,22 @@ async function finishRun(
   return await run;
 }
 
-function conversation(
-  session: Session,
-  supportsReadOnly: boolean
-): AgentConversation {
+function conversation(session: Session): AgentConversation {
+  // Every turn reads the published documentation over the network, which the
+  // read-only modes of several agents deny along with writing, so no turn asks
+  // for one. The recon prompt says to report without changing anything.
+  async function turn(prompt: string, opts?: TurnOptions): Promise<string> {
+    try {
+      const run = session.run(prompt, { signal: opts?.signal });
+      const result = await finishRun(run, session, opts?.onActivity);
+      return result.text;
+    } catch (error) {
+      throw publicError(TURN_ERROR, error);
+    }
+  }
+
   return {
-    async ask(prompt, opts) {
-      try {
-        const run = session.run(prompt, {
-          signal: opts?.signal,
-          ...(supportsReadOnly ? { readOnly: opts?.readOnly } : {}),
-        });
-        const result = await finishRun(run, session, opts?.onActivity);
-        return result.text;
-      } catch (error) {
-        throw publicError(TURN_ERROR, error);
-      }
-    },
+    ask: turn,
     async close() {
       try {
         await session.close();
@@ -94,15 +93,7 @@ function conversation(
         );
       }
     },
-    async work(prompt, opts) {
-      try {
-        const run = session.run(prompt, { signal: opts?.signal });
-        const result = await finishRun(run, session, opts?.onActivity);
-        return result.text;
-      } catch (error) {
-        throw publicError(TURN_ERROR, error);
-      }
-    },
+    work: turn,
   };
 }
 
@@ -114,11 +105,9 @@ export function anyAgentSeam(): AgentSeam {
       try {
         const results = await detect();
         return results.map((result) => {
-          const agent = create(result);
           const detected: DetectedAgent = {
             id: result.id,
             name: result.name,
-            supportsReadOnly: agent.supports("readOnly"),
             ...(result.version ? { version: result.version } : {}),
           };
           detectedResults.set(detected, result);
@@ -137,11 +126,7 @@ export function anyAgentSeam(): AgentSeam {
       }
 
       try {
-        const runnableAgent = create(result);
-        return conversation(
-          runnableAgent.session({ cwd }),
-          runnableAgent.supports("readOnly")
-        );
+        return conversation(create(result).session({ cwd }));
       } catch (error) {
         throw publicError(
           `Could not start ${agent.name}. Check that it is installed and authenticated, then try again.`,

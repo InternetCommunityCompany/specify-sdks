@@ -15,7 +15,7 @@ function reference(index: string): string {
 ${index}
 </specify-docs-index>
 
-That index lists every page of the Specify documentation, published at https://docs.specify.sh. Fetch the pages you judge relevant, and follow the import paths, names and options exactly as they appear there in preference to anything you remember about this SDK.`;
+That index lists every page of the Specify documentation. Fetch the ones you judge relevant from https://docs.specify.sh, adding .md to the path for the markdown of a page, as in https://docs.specify.sh/publishing/nextjs.md, and follow the import paths, names and options exactly as they appear there in preference to anything you remember about this SDK.`;
 }
 
 /**
@@ -29,7 +29,7 @@ export function reconPrompt(index: string): string {
 
 ${reference(index)}
 
-This turn reports, it does not change the project. Read the project and the documentation, then reply with a plan for adding the SDK here: what this project is, what you would change, and where an ad could go. Propose placements rather than settling them, because the developer chooses which ones to keep.
+This turn reports, it does not change the project: read whatever you need, but create, change, delete and install nothing until the developer has approved a plan. Read the project and the documentation, then reply with a plan for adding the SDK here: what this project is, what you would change, and where an ad could go. Propose placements rather than settling them, because the developer chooses which ones to keep.
 
 Reply with markdown and nothing else. This shape is a suggestion, not a requirement, so keep the Placements list if you propose any and structure the rest however this project needs:
 
@@ -49,7 +49,7 @@ export function feedbackPrompt(feedback: string): string {
 ${feedback}
 </feedback>
 
-Reply with a complete updated plan in markdown, not only the parts you changed. This turn still reports, it does not change the project.`;
+Reply with a complete updated plan in markdown, not only the parts you changed. This turn still reports, it does not change the project: create, change, delete and install nothing yet.`;
 }
 
 function keyInstruction(publisherKey: string): string {
