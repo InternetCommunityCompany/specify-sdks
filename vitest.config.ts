@@ -1,6 +1,9 @@
 import { defineConfig } from "vitest/config";
 
-const include = ["packages/*/test/**/*.test.ts"];
+const include = [
+  "packages/*/test/**/*.test.ts",
+  "packages/*/test/**/*.test.tsx",
+];
 
 export default defineConfig({
   test: {

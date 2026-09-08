@@ -8,7 +8,7 @@ export interface DetectedAgent {
 }
 
 export type AgentActivity =
-  | { kind: "tool"; name: string }
+  | { kind: "tool"; input: unknown; name: string }
   | {
       kind: "file";
       change: "create" | "modify" | "delete";
@@ -17,15 +17,23 @@ export type AgentActivity =
 
 export interface TurnOptions {
   onActivity?: (activity: AgentActivity) => void;
+  /** A JSON Schema the reply has to match, landing on `AgentReply.json`. */
+  schema?: Record<string, unknown>;
   signal?: AbortSignal;
+}
+
+export interface AgentReply {
+  /** The reply parsed and validated, when the turn asked for a schema. */
+  json?: unknown;
+  text: string;
 }
 
 export interface AgentConversation {
   /** A turn whose reply the wizard reads. */
-  ask: (prompt: string, opts?: TurnOptions) => Promise<string>;
+  ask: (prompt: string, opts?: TurnOptions) => Promise<AgentReply>;
   close: () => Promise<void>;
   /** A turn that changes the project. */
-  work: (prompt: string, opts?: TurnOptions) => Promise<string>;
+  work: (prompt: string, opts?: TurnOptions) => Promise<AgentReply>;
 }
 
 export interface AgentSeam {
@@ -50,7 +58,7 @@ async function finishRun(
 ) {
   for await (const event of run) {
     if (event.type === "tool-call") {
-      onActivity?.({ kind: "tool", name: event.name });
+      onActivity?.({ input: event.input, kind: "tool", name: event.name });
     } else if (event.type === "file-change") {
       onActivity?.({
         change: event.kind,
@@ -71,11 +79,14 @@ function conversation(session: Session): AgentConversation {
   // Every turn reads the published documentation over the network, which the
   // read-only modes of several agents deny along with writing, so no turn asks
   // for one. The recon prompt says to report without changing anything.
-  async function turn(prompt: string, opts?: TurnOptions): Promise<string> {
+  async function turn(prompt: string, opts?: TurnOptions): Promise<AgentReply> {
     try {
-      const run = session.run(prompt, { signal: opts?.signal });
+      const run = session.run(prompt, {
+        ...(opts?.schema ? { schema: opts.schema } : {}),
+        signal: opts?.signal,
+      });
       const result = await finishRun(run, session, opts?.onActivity);
-      return result.text;
+      return { json: result.json, text: result.text };
     } catch (error) {
       throw publicError(TURN_ERROR, error);
     }

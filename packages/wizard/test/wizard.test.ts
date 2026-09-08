@@ -3,56 +3,40 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { AgentConversation, AgentSeam, DetectedAgent } from "../src/agent";
+import type {
+  AgentConversation,
+  AgentReply,
+  AgentSeam,
+  DetectedAgent,
+} from "../src/agent";
+import type { Ui } from "../src/ui/host";
+import { type Choice, WizardCancelled } from "../src/ui/store";
 import { runWizard } from "../src/wizard";
 
-const AGENT: DetectedAgent = {
-  id: "codex",
-  name: "Codex",
-  version: "1.2.3",
+const AGENT: DetectedAgent = { id: "codex", name: "Codex", version: "1.2.3" };
+const HERO = "app/page.tsx - the hero, above the fold";
+const SIDEBAR = "app/blog/page.tsx - between the list and the footer";
+const DETAILS = "## What I found\n\nA Next.js app with the App Router.";
+const PLAN = {
+  details: DETAILS,
+  placements: [
+    { file: "app/page.tsx", reason: "the hero, above the fold" },
+    { file: "app/blog/page.tsx", reason: "between the list and the footer" },
+  ],
+  summary: "A Next.js app that needs the client and one slot.",
 };
-const KEY_PROMPT = "Paste your publisher key";
-const PLACEMENT_PROMPT = "Which of these placements";
-const REVIEW_PROMPT = "Go ahead with this plan?";
-const FEEDBACK_PROMPT = "What should the agent do differently?";
-const ENTER = "\r";
-const DOWN = "\u001B[B";
-const SPACE = " ";
-const HERO = "`app/page.tsx` - the hero, above the fold";
-const SIDEBAR = "`app/blog/page.tsx` - between the list and the footer";
-const PLAN = `## What I found
-
-A Next.js app with the App Router, TypeScript and pnpm.
-
-## What I will change
-
-- Create lib/specify.ts with the shared client.
-- Add NEXT_PUBLIC_SPECIFY_PUBLISHER_KEY to .env.local.
-
-## Placements
-
-- ${HERO}
-- ${SIDEBAR}
-
-## Notes
-
-Cookiebot already handles consent in app/layout.tsx.`;
-const PLAN_WITHOUT_PLACEMENTS = `## What I found
-
-A plain JavaScript site built with esbuild.
-
-## What I will change
-
-- Add the shared client to src/specify.js.`;
-const TEST_TIMEOUT = 20_000;
+const PLAN_WITHOUT_PLACEMENTS = {
+  details: "## What I found\n\nA plain site built with esbuild.",
+  placements: [],
+  summary: "A plain esbuild site.",
+};
 
 const directories: string[] = [];
-let index: string;
+let docsIndex: string;
 
 beforeAll(async () => {
-  index = await readFile(
+  docsIndex = await readFile(
     resolve("packages/wizard/test/fixtures/llms.txt"),
     "utf8"
   );
@@ -92,55 +76,94 @@ function plainDirectory(): string {
   return cwd;
 }
 
-/**
- * A terminal the test can read and type into. Keys are written once the
- * prompt that consumes them has rendered, so a slow machine cannot make the
- * script land on the wrong prompt.
- */
-function terminal() {
-  const waiters = new Set<() => void>();
-  let captured = "";
-  let cursor = 0;
-  const input = new PassThrough();
-  const output = new Writable({
-    write(chunk, _encoding, callback) {
-      captured += String(chunk);
-      for (const waiter of [...waiters]) {
-        waiter();
-      }
-      callback();
-    },
-  });
+interface Answers {
+  confirm?: boolean[];
+  /** Labels to keep; anything else offered is dropped. */
+  multiselect?: string[][];
+  review?: string[];
+  select?: string[];
+  text?: string[];
+}
 
-  function waitFor(marker: string): Promise<void> {
-    return new Promise((done, fail) => {
-      const timer = setTimeout(() => {
-        waiters.delete(check);
-        fail(new Error(`Never saw "${marker}". Captured:\n${captured}`));
-      }, 10_000);
-      function check() {
-        const found = captured.indexOf(marker, cursor);
-        if (found === -1) {
-          return;
-        }
-        cursor = found + marker.length;
-        clearTimeout(timer);
-        waiters.delete(check);
-        done();
-      }
-      waiters.add(check);
-      check();
-    });
+interface FakeUi extends Ui {
+  asked: string[];
+  /** Each step as `title: detail` once it settles. */
+  finished: string[];
+  offered: string[][];
+  record: string[];
+  shown: string[];
+  titles: string[];
+}
+
+function next<T>(queue: T[] | undefined, what: string): T {
+  const value = queue?.shift();
+  if (value === undefined) {
+    throw new Error(`The script ran out of ${what} answers`);
   }
+  return value;
+}
+
+function fakeUi(answers: Answers = {}): FakeUi {
+  const asked: string[] = [];
+  const finished: string[] = [];
+  const offered: string[][] = [];
+  const record: string[] = [];
+  const shown: string[] = [];
+  const titles: string[] = [];
+  const labels = (choices: Choice[]) => choices.map((choice) => choice.label);
+  const named = (at: number) => titles[at] ?? `step ${at}`;
 
   return {
-    input,
-    output,
-    text: () => captured,
-    async type(marker: string, keys: string) {
-      await waitFor(marker);
-      input.write(keys);
+    activity: (line) => shown.push(line),
+    asked,
+    begin: (at) => shown.push(`begin ${named(at)}`),
+    clear: () => shown.push("clear"),
+    close: () => Promise.resolve(),
+    confirm(message) {
+      asked.push(message);
+      return Promise.resolve(next(answers.confirm, "confirm"));
     },
+    error: (lines) => shown.push(lines.join("\n")),
+    fail(at, detail) {
+      finished.push(`${named(at)} failed: ${detail ?? ""}`);
+    },
+    finish(at, detail) {
+      finished.push(detail ? `${named(at)}: ${detail}` : named(at));
+    },
+    finished,
+    keep: (text) => record.push(text),
+    multiselect(message, choices) {
+      asked.push(message);
+      offered.push(labels(choices));
+      return Promise.resolve(next(answers.multiselect, "multiselect"));
+    },
+    note: (title, lines) => shown.push(`${title}: ${lines.join(" | ")}`),
+    offered,
+    plan(steps, where) {
+      titles.splice(0, titles.length, ...steps);
+      shown.push(`where ${where}`);
+    },
+    record,
+    review(plan, message, choices) {
+      asked.push(message);
+      shown.push(plan.details);
+      offered.push(labels(choices));
+      return Promise.resolve(next(answers.review, "review"));
+    },
+    select(message, choices) {
+      asked.push(message);
+      offered.push(labels(choices));
+      return Promise.resolve(next(answers.select, "select"));
+    },
+    shown,
+    startTask: (title) => shown.push(title),
+    stopTask: () => shown.push("stop"),
+    text(message) {
+      asked.push(message);
+      return Promise.resolve(next(answers.text, "text"));
+    },
+    titles,
+    warn: (lines) => shown.push(lines.join("\n")),
   };
 }
 
@@ -153,7 +176,7 @@ interface FakeSeam extends AgentSeam {
 function fakeSeam(options: {
   agents?: DetectedAgent[];
   onWork?: () => void;
-  plans?: string[];
+  plans?: (unknown | undefined)[];
 }): FakeSeam {
   const plans = [...(options.plans ?? [])];
   const asks: string[] = [];
@@ -165,19 +188,18 @@ function fakeSeam(options: {
     open(): AgentConversation {
       seam.conversations += 1;
       return {
-        ask: (prompt) => {
+        ask: (prompt): Promise<AgentReply> => {
           asks.push(prompt);
-          const plan = plans.shift();
-          if (plan === undefined) {
+          if (plans.length === 0) {
             throw new Error("The fake agent ran out of plans");
           }
-          return Promise.resolve(plan);
+          return Promise.resolve({ json: plans.shift(), text: "" });
         },
         close: () => Promise.resolve(),
-        work: (prompt) => {
+        work: (prompt): Promise<AgentReply> => {
           works.push(prompt);
           options.onWork?.();
-          return Promise.resolve("done");
+          return Promise.resolve({ text: "done" });
         },
       };
     },
@@ -189,390 +211,454 @@ function fakeSeam(options: {
 function docsFetch(urls: string[] = []): typeof fetch {
   return ((url: string) => {
     urls.push(String(url));
-    return Promise.resolve(new Response(index));
+    // No publishing bundle in these runs, so the index path is exercised.
+    return Promise.resolve(
+      String(url).endsWith("llms-full.txt")
+        ? new Response("not here", { status: 404 })
+        : new Response(docsIndex)
+    );
   }) as unknown as typeof fetch;
 }
 
 describe("runWizard", () => {
-  it(
-    "plans, implements and reports the changes",
-    async () => {
-      const cwd = repository();
-      const urls: string[] = [];
-      const seam = fakeSeam({
-        onWork: () => {
-          mkdirSync(dirname(join(cwd, "lib/specify.ts")), { recursive: true });
-          writeFileSync(join(cwd, "lib/specify.ts"), "// client\n");
+  it("plans, implements and reports the changes", async () => {
+    const cwd = repository();
+    const urls: string[] = [];
+    const seam = fakeSeam({
+      onWork: () => {
+        mkdirSync(dirname(join(cwd, "lib/specify.ts")), { recursive: true });
+        writeFileSync(join(cwd, "lib/specify.ts"), "// client\n");
+        writeFileSync(join(cwd, ".env.local"), "KEY=spk_your_key_here\n");
+      },
+      plans: [PLAN],
+    });
+    const ui = fakeUi({ multiselect: [[HERO, SIDEBAR]], review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd, fetchImpl: docsFetch(urls), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(urls).toContain("https://docs.specify.sh/llms.txt");
+    expect(urls).toContain("https://docs.specify.sh/publishing/llms-full.txt");
+    expect(seam.conversations).toBe(1);
+    expect(seam.asks).toHaveLength(1);
+    expect(seam.asks[0]).toContain("This turn reports");
+    expect(seam.asks[0]).toContain("[Next.js](/publishing/nextjs)");
+    expect(seam.works).toHaveLength(1);
+    expect(seam.works[0]).toContain("<specify-docs-index>");
+    expect(seam.works[0]).toContain(DETAILS);
+    expect(seam.works[0]).toContain("Do not commit");
+    expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
+    expect(ui.finished).toContain("Choose a coding agent: Codex 1.2.3");
+    expect(ui.finished).toContain(`Read the project: ${PLAN.summary}`);
+    expect(ui.record.join("\n")).toContain("lib/specify.ts");
+    expect(ui.record.join("\n")).toContain("New files, not yet tracked by Git");
+  });
+
+  it("walks the developer through numbered steps", async () => {
+    const ui = fakeUi({ multiselect: [[HERO]], review: ["approve"] });
+
+    await runWizard({
+      cwd: repository(),
+      fetchImpl: docsFetch(),
+      seam: fakeSeam({ plans: [PLAN] }),
+      ui,
+    });
+
+    expect(ui.titles).toEqual([
+      "Choose a coding agent",
+      "Check the working tree",
+      "Read the project",
+      "Review the plan",
+      "Write the changes",
+    ]);
+    for (const title of ui.titles) {
+      expect(ui.shown).toContain(`begin ${title}`);
+    }
+    expect(ui.finished).toContain("Check the working tree: clean");
+    expect(ui.finished).toContain("Review the plan: 1 placement");
+  });
+
+  it("says what will happen before the agent is let loose", async () => {
+    const ui = fakeUi({ multiselect: [[HERO]], review: ["approve"] });
+    const cwd = repository();
+
+    await runWizard({
+      cwd,
+      fetchImpl: docsFetch(),
+      seam: fakeSeam({ plans: [PLAN] }),
+      ui,
+    });
+
+    const contract = ui.shown.find((line) => line.startsWith("How this works"));
+    expect(contract).toBeDefined();
+    expect(contract).toContain("Nothing is written until you approve");
+    expect(contract).toContain("stay uncommitted in your working tree");
+    expect(contract).toContain("never to Specify");
+    expect(contract).toContain("Codex reads this project");
+    expect(contract).not.toContain("1.2.3");
+    expect(ui.shown).toContain(`where ${cwd}`);
+  });
+
+  it("summarizes each turn by what the agent actually did", async () => {
+    const seam: AgentSeam = {
+      detect: () => Promise.resolve([AGENT]),
+      open: () => ({
+        ask: (_prompt, opts) => {
+          opts?.onActivity?.({
+            input: { path: "package.json" },
+            kind: "tool",
+            name: "read",
+          });
+          opts?.onActivity?.({
+            input: { command: "bun pm ls" },
+            kind: "tool",
+            name: "bash",
+          });
+          return Promise.resolve({ json: PLAN_WITHOUT_PLACEMENTS, text: "" });
         },
-        plans: [PLAN],
-      });
-      const script = terminal();
+        close: () => Promise.resolve(),
+        work: (_prompt, opts) => {
+          opts?.onActivity?.({
+            change: "create",
+            kind: "file",
+            path: "lib/specify.ts",
+          });
+          return Promise.resolve({ text: "done" });
+        },
+      }),
+    };
+    const ui = fakeUi({ review: ["approve"] });
 
-      const exitCode = runWizard({
-        cwd,
-        fetchImpl: docsFetch(urls),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, `spk_live_pasted_key${ENTER}`);
-      await script.type(PLACEMENT_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
+    await runWizard({
+      cwd: repository(),
+      fetchImpl: docsFetch(),
+      seam,
+      ui,
+    });
 
-      await expect(exitCode).resolves.toBe(0);
-      expect(urls).toEqual(["https://docs.specify.sh/llms.txt"]);
-      expect(seam.conversations).toBe(1);
-      expect(seam.asks).toHaveLength(1);
-      expect(seam.asks[0]).toContain("This turn reports");
-      expect(seam.asks[0]).toContain("[Next.js](/publishing/nextjs)");
-      expect(seam.works).toHaveLength(1);
-      expect(seam.works[0]).toContain("spk_live_pasted_key");
-      expect(seam.works[0]).toContain("<specify-docs-index>");
-      expect(seam.works[0]).toContain("## What I found");
-      expect(seam.works[0]).toContain("Do not commit");
-      expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
-      expect(script.text()).toContain("Using Codex 1.2.3");
-      expect(script.text()).toContain("Nothing has been changed yet.");
-      expect(script.text()).toContain("lib/specify.ts");
-      expect(script.text()).toContain("New files, not yet tracked by Git");
-    },
-    TEST_TIMEOUT
-  );
+    expect(ui.shown).toContain("Read package.json");
+    expect(ui.shown).toContain("Ran bun pm ls");
+    expect(ui.shown).toContain("Created lib/specify.ts");
+    expect(ui.finished).toContain("Write the changes");
+  });
 
-  it(
-    "builds the placements the developer kept and names the ones they dropped",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN] });
-      const script = terminal();
+  it("builds the placements the developer kept and names the ones they dropped", async () => {
+    const seam = fakeSeam({ plans: [PLAN] });
+    const ui = fakeUi({ multiselect: [[HERO]], review: ["approve"] });
 
-      const exitCode = runWizard({
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(ui.offered).toContainEqual([HERO, SIDEBAR]);
+    expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
+    expect(seam.works[0]).toContain(`Do not add them:\n- ${SIDEBAR}`);
+  });
+
+  it("still implements when the developer keeps no placement at all", async () => {
+    const seam = fakeSeam({ plans: [PLAN] });
+    const ui = fakeUi({ multiselect: [[]], review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.works[0]).toContain(
+      "wants none of the placements you proposed"
+    );
+    expect(seam.works[0]).toContain(`Do not add them:\n- ${HERO}`);
+    expect(seam.works[0]).toContain(SIDEBAR);
+  });
+
+  it("skips the picker when the plan proposes no placements", async () => {
+    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(ui.asked).not.toContain(
+      "Which of these placements should the agent build?"
+    );
+    expect(seam.works[0]).not.toContain("Build these and no others");
+  });
+
+  it("asks once more when the agent does not answer with a plan", async () => {
+    const seam = fakeSeam({ plans: [undefined, PLAN_WITHOUT_PLACEMENTS] });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.conversations).toBe(1);
+    expect(seam.asks).toHaveLength(2);
+    expect(seam.asks[0]).toBe(seam.asks[1]);
+    expect(seam.works).toHaveLength(1);
+  });
+
+  it("stops without changing anything when neither reply is a plan", async () => {
+    const seam = fakeSeam({ plans: [undefined, { details: "" }] });
+    const ui = fakeUi();
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(1);
+
+    expect(seam.asks).toHaveLength(2);
+    expect(seam.works).toEqual([]);
+    expect(ui.shown.join("\n")).toContain("did not report a plan, twice");
+    expect(ui.finished.join("\n")).toContain("Read the project failed");
+    expect(ui.record.join("\n")).toContain(
+      "https://docs.specify.sh/publishing/get-started"
+    );
+  });
+
+  it("sends feedback back to the same conversation", async () => {
+    const revised = {
+      ...PLAN_WITHOUT_PLACEMENTS,
+      details: "## What I found\n\nThe client belongs in src/ads.js.",
+    };
+    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS, revised] });
+    const ui = fakeUi({
+      review: ["feedback", "approve"],
+      text: ["Put the client in src/ads.js"],
+    });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.conversations).toBe(1);
+    expect(seam.asks).toHaveLength(2);
+    expect(seam.asks[1]).toContain("Put the client in src/ads.js");
+    expect(seam.works[0]).toContain("src/ads.js");
+  });
+
+  it("re-asks without a turn when the developer sends empty feedback", async () => {
+    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const ui = fakeUi({ review: ["feedback", "approve"], text: ["   "] });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.asks).toHaveLength(1);
+    expect(seam.works).toHaveLength(1);
+  });
+
+  it("changes nothing when the plan is aborted", async () => {
+    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const ui = fakeUi({ review: ["abort"] });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.works).toEqual([]);
+    expect(ui.record.join("\n")).toContain("Aborted");
+  });
+
+  it("never asks for a publisher key, and says how to add one", async () => {
+    const cwd = repository();
+    const seam = fakeSeam({
+      onWork: () =>
+        writeFileSync(
+          join(cwd, ".env.local"),
+          "# replace this\nKEY=spk_your_key_here\n"
+        ),
+      plans: [PLAN_WITHOUT_PLACEMENTS],
+    });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd, fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(ui.asked.join("\n")).not.toContain("publisher key");
+    expect(seam.works[0]).toContain("must not ask for one");
+    const record = ui.record.join("\n");
+    expect(record).toContain("Add your publisher key");
+    expect(record).toContain("Replace spk_your_key_here in .env.local");
+    expect(record).toContain("https://app.specify.sh/publish/publisher-keys");
+  });
+
+  it("still says how to add a key when no env file names the placeholder", async () => {
+    const ui = fakeUi({ review: ["approve"] });
+
+    await runWizard({
+      cwd: repository(),
+      fetchImpl: docsFetch(),
+      seam: fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] }),
+      ui,
+    });
+
+    expect(ui.record.join("\n")).toContain(
+      "Replace spk_your_key_here in the env file the agent wrote"
+    );
+  });
+
+  it("stops when the developer declines a dirty working tree", async () => {
+    const seam = fakeSeam({ plans: [PLAN] });
+    const ui = fakeUi({ confirm: [false] });
+
+    await expect(
+      runWizard({ cwd: repository(true), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.conversations).toBe(0);
+    expect(seam.works).toEqual([]);
+    expect(ui.shown.join("\n")).toContain("changes will mix with yours");
+  });
+
+  it("warns that a directory outside Git leaves no diff to review", async () => {
+    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const ui = fakeUi({ confirm: [true], review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd: plainDirectory(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.works).toHaveLength(1);
+    expect(ui.shown.join("\n")).toContain("not a Git repository");
+    expect(ui.record.join("\n")).toContain("no diff to show");
+  });
+
+  it("asks which agent to use when several are installed", async () => {
+    const seam = fakeSeam({
+      agents: [AGENT, { id: "claude", name: "Claude Code" }],
+      plans: [PLAN_WITHOUT_PLACEMENTS],
+    });
+    const ui = fakeUi({ review: ["approve"], select: ["claude"] });
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(ui.offered).toContainEqual(["Codex 1.2.3", "Claude Code"]);
+    expect(ui.finished).toContain("Choose a coding agent: Claude Code");
+  });
+
+  it("points to the manual guide when no agent is installed", async () => {
+    const ui = fakeUi();
+
+    await expect(
+      runWizard({
         cwd: repository(),
         fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(PLACEMENT_PROMPT, `${DOWN}${SPACE}${ENTER}`);
-      await script.type(REVIEW_PROMPT, ENTER);
+        seam: fakeSeam({ agents: [] }),
+        ui,
+      })
+    ).resolves.toBe(1);
 
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.works).toHaveLength(1);
-      expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
-      expect(seam.works[0]).toContain(`Do not add them:\n- ${SIDEBAR}`);
-      expect(script.text()).toContain("Which of these placements");
-    },
-    TEST_TIMEOUT
-  );
+    expect(ui.shown.join("\n")).toContain(
+      "No supported coding agent was found"
+    );
+    expect(ui.shown.join("\n")).toContain(
+      "https://docs.specify.sh/publishing/get-started"
+    );
+  });
 
-  it(
-    "still implements when the developer keeps no placement at all",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN] });
-      const script = terminal();
+  it("stops before the first turn when the documentation cannot be fetched", async () => {
+    const seam = fakeSeam({ plans: [PLAN] });
+    const ui = fakeUi();
 
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(PLACEMENT_PROMPT, `${SPACE}${DOWN}${SPACE}${ENTER}`);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.works).toHaveLength(1);
-      expect(seam.works[0]).toContain(
-        "wants none of the placements you proposed"
-      );
-      expect(seam.works[0]).toContain(`Do not add them:\n- ${HERO}`);
-      expect(seam.works[0]).toContain(SIDEBAR);
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "skips the picker when the plan proposes no placements",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(script.text()).not.toContain("Which of these placements");
-      expect(seam.works).toHaveLength(1);
-      expect(seam.works[0]).toContain("built with esbuild");
-      expect(seam.works[0]).not.toContain("Build these and no others");
-      expect(seam.works[0]).not.toContain("Do not add them");
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "asks once more when the agent replies with nothing",
-    async () => {
-      const seam = fakeSeam({ plans: ["  \n", PLAN_WITHOUT_PLACEMENTS] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.conversations).toBe(1);
-      expect(seam.asks).toHaveLength(2);
-      expect(seam.asks[0]).toBe(seam.asks[1]);
-      expect(seam.works).toHaveLength(1);
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "stops without changing anything when both replies are empty",
-    async () => {
-      const seam = fakeSeam({ plans: ["", ""] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(1);
-      expect(seam.asks).toHaveLength(2);
-      expect(seam.works).toEqual([]);
-      expect(script.text()).toContain("replied with nothing, twice");
-      expect(script.text()).toContain(
-        "https://docs.specify.sh/publishing/get-started"
-      );
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "sends feedback back to the same conversation",
-    async () => {
-      const revised = PLAN_WITHOUT_PLACEMENTS.replace(
-        "src/specify.js",
-        "src/ads.js"
-      );
-      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS, revised] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, `${DOWN}${ENTER}`);
-      await script.type(
-        FEEDBACK_PROMPT,
-        `Put the client in src/ads.js${ENTER}`
-      );
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.conversations).toBe(1);
-      expect(seam.asks).toHaveLength(2);
-      expect(seam.asks[1]).toContain("Put the client in src/ads.js");
-      expect(seam.works[0]).toContain("src/ads.js");
-      expect(script.text()).toContain("src/ads.js");
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "changes nothing when the plan is aborted",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, `${DOWN}${DOWN}${ENTER}`);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.works).toEqual([]);
-      expect(script.text()).toContain("Aborted");
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "uses the placeholder key when the key is skipped",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.works[0]).toContain("spk_your_key_here");
-      expect(seam.works[0]).toContain(
-        "https://app.specify.sh/publish/publisher-keys"
-      );
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "stops when the developer declines a dirty working tree",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(true),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type("Continue anyway?", "n");
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.conversations).toBe(0);
-      expect(seam.works).toEqual([]);
-      expect(script.text()).toContain("changes will mix with yours");
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "warns that a directory outside Git leaves no diff to review",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: plainDirectory(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type("Continue anyway?", "y");
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(seam.works).toHaveLength(1);
-      expect(script.text()).toContain("not a Git repository");
-      expect(script.text()).toContain("no diff to show");
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "asks the developer which agent to use when several are installed",
-    async () => {
-      const seam = fakeSeam({
-        agents: [AGENT, { id: "claude", name: "Claude Code" }],
-        plans: [PLAN_WITHOUT_PLACEMENTS],
-      });
-      const script = terminal();
-
-      const exitCode = runWizard({
-        cwd: repository(),
-        fetchImpl: docsFetch(),
-        input: script.input,
-        output: script.output,
-        seam,
-      });
-      await script.type("Which coding agent", `${DOWN}${ENTER}`);
-      await script.type(KEY_PROMPT, ENTER);
-      await script.type(REVIEW_PROMPT, ENTER);
-
-      await expect(exitCode).resolves.toBe(0);
-      expect(script.text()).toContain("Claude Code");
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "points to the manual guide when no agent is installed",
-    async () => {
-      const seam = fakeSeam({ agents: [] });
-      const script = terminal();
-
-      await expect(
-        runWizard({
-          cwd: repository(),
-          fetchImpl: docsFetch(),
-          input: script.input,
-          output: script.output,
-          seam,
-        })
-      ).resolves.toBe(1);
-      expect(script.text()).toContain("No supported coding agent was found");
-      expect(script.text()).toContain(
-        "https://docs.specify.sh/publishing/get-started"
-      );
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "stops before the first turn when the documentation cannot be fetched",
-    async () => {
-      const seam = fakeSeam({ plans: [PLAN] });
-      const script = terminal();
-
-      const exitCode = runWizard({
+    await expect(
+      runWizard({
         cwd: repository(),
         fetchImpl: (() =>
           Promise.resolve(
             new Response("nope", { status: 503 })
           )) as unknown as typeof fetch,
-        input: script.input,
-        output: script.output,
         seam,
-      });
-      await script.type(KEY_PROMPT, ENTER);
+        ui,
+      })
+    ).resolves.toBe(1);
 
-      await expect(exitCode).resolves.toBe(1);
-      expect(seam.conversations).toBe(0);
-      expect(seam.asks).toEqual([]);
-      expect(script.text()).toContain("https://docs.specify.sh/llms.txt");
-    },
-    TEST_TIMEOUT
-  );
+    expect(seam.conversations).toBe(0);
+    expect(seam.asks).toEqual([]);
+    expect(ui.record.join("\n")).toContain("https://docs.specify.sh/llms.txt");
+  });
+
+  it("stops cleanly when the developer presses Ctrl-C at a prompt", async () => {
+    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const ui = fakeUi();
+    ui.review = () =>
+      Promise.reject(new WizardCancelled("Stopped. Nothing was changed."));
+
+    await expect(
+      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+    ).resolves.toBe(0);
+
+    expect(seam.works).toEqual([]);
+    expect(ui.record.join("\n")).toContain("Stopped. Nothing was changed.");
+  });
+
+  it("does not carry on when a turn finishes after the developer stopped", async () => {
+    const stopping = new AbortController();
+    const seam: AgentSeam = {
+      detect: () => Promise.resolve([AGENT]),
+      open: () => ({
+        // An agent that ignores the signal and answers anyway.
+        ask: () => {
+          stopping.abort();
+          return Promise.resolve({ json: PLAN, text: "" });
+        },
+        close: () => Promise.resolve(),
+        work: () => Promise.resolve({ text: "done" }),
+      }),
+    };
+    const ui = fakeUi();
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        seam,
+        signal: stopping.signal,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(ui.asked).not.toContain("Go ahead with this plan?");
+    expect(ui.record.join("\n")).toContain("check git status");
+  });
+
+  it("names the cause of a failure only when asked to be verbose", async () => {
+    const failing: AgentSeam = {
+      detect: () => Promise.resolve([AGENT]),
+      open: () => ({
+        ask: () => {
+          throw new Error("The coding agent could not complete the request.", {
+            cause: new Error("codex exited with status 127"),
+          });
+        },
+        close: () => Promise.resolve(),
+        work: () => Promise.resolve({ text: "" }),
+      }),
+    };
+    const quiet = fakeUi();
+    const loud = fakeUi();
+
+    await runWizard({
+      cwd: repository(),
+      fetchImpl: docsFetch(),
+      seam: failing,
+      ui: quiet,
+    });
+    await runWizard({
+      cwd: repository(),
+      fetchImpl: docsFetch(),
+      seam: failing,
+      ui: loud,
+      verbose: true,
+    });
+
+    expect(quiet.record.join("\n")).not.toContain("status 127");
+    expect(loud.record.join("\n")).toContain(
+      "caused by: Error: codex exited with status 127"
+    );
+  });
 });

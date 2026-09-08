@@ -1,16 +1,11 @@
-import type { ChosenPlacements } from "./placements";
+import type { Docs } from "./docs";
+import type { ChosenPlacements } from "./plan";
 
 export const PLACEHOLDER_PUBLISHER_KEY = "spk_your_key_here";
 export const PUBLISHER_KEYS_URL =
   "https://app.specify.sh/publish/publisher-keys";
 
-const RECOMMENDED_PLAN = `## What I found
-## What I will change
-## Placements
-- \`path/to/File.tsx\` - short reason
-## Notes`;
-
-function reference(index: string): string {
+function indexReference(index: string): string {
   return `<specify-docs-index>
 ${index}
 </specify-docs-index>
@@ -18,22 +13,37 @@ ${index}
 That index lists every page of the Specify documentation. Fetch the ones you judge relevant from https://docs.specify.sh, adding .md to the path for the markdown of a page, as in https://docs.specify.sh/publishing/nextjs.md, and follow the import paths, names and options exactly as they appear there in preference to anything you remember about this SDK.`;
 }
 
+function reference(docs: Docs): string {
+  if (docs.bundle === undefined) {
+    return indexReference(docs.index);
+  }
+  return `<specify-publishing-docs>
+${docs.bundle}
+</specify-publishing-docs>
+
+That is the full publishing documentation, included so you do not need to fetch it. Follow the import paths, names and options exactly as they appear there in preference to anything you remember about this SDK.
+
+<specify-docs-index>
+${docs.index}
+</specify-docs-index>
+
+The index lists every page, including ones outside the publishing documentation. Fetch a page from https://docs.specify.sh, adding .md to its path, only when what you need is not included above.`;
+}
+
 /**
  * The turn that reads the project and reports a plan.
  *
- * @param index The documentation index, fetched as the run started.
+ * @param docs The documentation, fetched as the run started.
  * @returns The prompt for the recon turn.
  */
-export function reconPrompt(index: string): string {
+export function reconPrompt(docs: Docs): string {
   return `You are helping a developer add the Specify publisher SDK to the project in this directory. Specify serves ads to onchain audiences, and the SDK asks Specify for an ad and hands back what to render.
 
-${reference(index)}
+${reference(docs)}
 
-This turn reports, it does not change the project: read whatever you need, but create, change, delete and install nothing until the developer has approved a plan. Read the project and the documentation, then reply with a plan for adding the SDK here: what this project is, what you would change, and where an ad could go. Propose placements rather than settling them, because the developer chooses which ones to keep.
+This turn reports, it does not change the project: read whatever you need, but create, change, delete and install nothing until the developer has approved a plan. Read the project and the documentation, then report a plan for adding the SDK here: what this project is, what you would change, and where an ad could go. Propose placements rather than settling them, because the developer chooses which ones to keep.
 
-Reply with markdown and nothing else. This shape is a suggestion, not a requirement, so keep the Placements list if you propose any and structure the rest however this project needs:
-
-${RECOMMENDED_PLAN}`;
+Write the plan for the developer who will read it, not as a report of what you just did: no progress commentary, no "I'll start by", no narration of the files you opened.`;
 }
 
 /**
@@ -49,14 +59,7 @@ export function feedbackPrompt(feedback: string): string {
 ${feedback}
 </feedback>
 
-Reply with a complete updated plan in markdown, not only the parts you changed. This turn still reports, it does not change the project: create, change, delete and install nothing yet.`;
-}
-
-function keyInstruction(publisherKey: string): string {
-  if (publisherKey === PLACEHOLDER_PUBLISHER_KEY) {
-    return `The developer does not have a publisher key yet. Write ${PLACEHOLDER_PUBLISHER_KEY} into the env file the plan names, with a comment above it saying to replace it with a key from ${PUBLISHER_KEYS_URL}.`;
-  }
-  return `Write the publisher key ${publisherKey} into the env file the plan names.`;
+Report a complete updated plan, not only the parts you changed. This turn still reports, it does not change the project: create, change, delete and install nothing yet.`;
 }
 
 function list(labels: string[]): string {
@@ -87,17 +90,15 @@ function placementInstruction(placements: ChosenPlacements): string {
  * pull a page it needs while it works.
  *
  * @param options The approved plan, the placements the developer kept and
- * dropped, the key that was pasted or the placeholder, and the documentation
- * index.
+ * dropped, and the documentation index.
  * @returns The prompt for the implement turn.
  */
 export function implementPrompt(options: {
-  index: string;
+  docs: Docs;
   placements: ChosenPlacements;
   plan: string;
-  publisherKey: string;
 }): string {
-  return `${reference(options.index)}
+  return `${indexReference(options.docs.index)}
 
 Implement the plan below in this project. The developer has read it and approved it.
 
@@ -105,7 +106,7 @@ Implement the plan below in this project. The developer has read it and approved
 ${options.plan}
 </approved-plan>
 
-${placementInstruction(options.placements)}${keyInstruction(options.publisherKey)}
+${placementInstruction(options.placements)}The developer has not given you a publisher key, and you must not ask for one. Write ${PLACEHOLDER_PUBLISHER_KEY} into the env file the plan names, with a comment above it saying to replace it with a key from ${PUBLISHER_KEYS_URL}. Tell them in your final message which file that is.
 
 Do not commit. No git commit, no git push, no pull request. Leave every change in the working tree, because the developer reviews the diff once you are done.`;
 }

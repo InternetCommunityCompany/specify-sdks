@@ -1,26 +1,21 @@
-import type { Readable, Writable } from "node:stream";
-import {
-  cancel,
-  confirm,
-  intro,
-  isCancel,
-  log,
-  multiselect,
-  note,
-  outro,
-  select,
-  spinner,
-  text,
-} from "@clack/prompts";
+import { homedir } from "node:os";
 import type {
   AgentActivity,
   AgentConversation,
   AgentSeam,
   DetectedAgent,
 } from "./agent";
-import { fetchDocsIndex } from "./docs";
-import { type ChosenPlacements, parsePlacements } from "./placements";
+import { type Docs, fetchDocs } from "./docs";
+import { createNarrator } from "./narration";
 import {
+  type ChosenPlacements,
+  PLAN_SCHEMA,
+  type Plan,
+  placementLabel,
+  readPlan,
+} from "./plan";
+import {
+  envFilesWithPlaceholder,
   inspectWorkingTree,
   summarizeChanges,
   type TreeState,
@@ -32,47 +27,48 @@ import {
   PUBLISHER_KEYS_URL,
   reconPrompt,
 } from "./prompts";
-import { renderPlan } from "./render";
+import type { Ui } from "./ui/host";
+import { WizardCancelled } from "./ui/store";
 
 const PUBLISHER_GUIDE = "https://docs.specify.sh/publishing/get-started";
-const FILE_VERBS = {
-  create: "Creating",
-  delete: "Deleting",
-  modify: "Editing",
-} as const;
+/** The whole run, laid out before it starts. */
+const STEPS = [
+  "Choose a coding agent",
+  "Check the working tree",
+  "Read the project",
+  "Review the plan",
+  "Write the changes",
+] as const;
+const AGENT_STEP = 0;
+const TREE_STEP = 1;
+const READ_STEP = 2;
+const REVIEW_STEP = 3;
+const WRITE_STEP = 4;
+const STOPPED_MID_RUN =
+  "Stopped. The agent may already have changed files, so check git status.";
 
 export interface WizardOptions {
   cwd: string;
   fetchImpl?: typeof fetch;
-  input: Readable;
-  output: Writable;
   seam: AgentSeam;
   signal?: AbortSignal;
-}
-
-interface WizardIo {
-  input: Readable;
-  output: Writable;
-}
-
-interface TurnLabels {
-  done: string;
-  failed: string;
-  start: string;
+  ui: Ui;
+  verbose?: boolean;
 }
 
 /** Everything a turn needs: who is running it, where, and how to show it. */
 interface TurnContext {
   agent: DetectedAgent;
   conversation: AgentConversation;
-  io: WizardIo;
+  cwd: string;
   signal: AbortSignal | undefined;
+  ui: Ui;
 }
 
 /** A plan the developer approved, with the placements they kept. */
 interface ApprovedPlan {
   placements: ChosenPlacements;
-  plan: string;
+  plan: Plan;
 }
 
 /** A stop the developer asked for. It ends the run at exit code 0. */
@@ -82,45 +78,63 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-function answered<Value>(value: Value | symbol): Value {
-  if (isCancel(value)) {
-    throw new WizardStop("Cancelled. Nothing was changed.");
+/** The chain a verbose run shows, so a wrapped failure names its real cause. */
+function causes(error: unknown): string[] {
+  const chain: string[] = [];
+  let current: unknown = error;
+  while (current instanceof Error && current.cause !== undefined) {
+    current = current.cause;
+    chain.push(
+      current instanceof Error
+        ? `${current.name}: ${current.message}`
+        : String(current)
+    );
   }
-  return value as Value;
+  return chain;
 }
 
 function describeAgent(agent: DetectedAgent): string {
   return agent.version ? `${agent.name} ${agent.version}` : agent.name;
 }
 
-function describeActivity(activity: AgentActivity): string {
-  return activity.kind === "tool"
-    ? `Running ${activity.name}`
-    : `${FILE_VERBS[activity.change]} ${activity.path}`;
+/** A path the developer recognises, rather than one that eats the line. */
+function shorten(cwd: string): string {
+  const home = homedir();
+  return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+}
+
+function contract(ui: Ui, agent: DetectedAgent): void {
+  // The name alone: the checklist row above already carries the version.
+  ui.note("How this works", [
+    `${agent.name} reads this project and the Specify docs, then proposes a plan.`,
+    "Nothing is written until you approve that plan.",
+    "Approved changes stay uncommitted in your working tree for you to review.",
+    `Your code goes to ${agent.name}'s model provider, never to Specify.`,
+  ]);
 }
 
 async function chooseAgent(
   agents: DetectedAgent[],
-  io: WizardIo
+  ui: Ui
 ): Promise<DetectedAgent> {
   const [only] = agents;
   if (agents.length === 1 && only) {
-    log.info(`Using ${describeAgent(only)}.`, io);
     return only;
   }
-  return answered(
-    await select<DetectedAgent>({
-      message: "Which coding agent should add the SDK?",
-      options: agents.map((agent) => ({
-        label: describeAgent(agent),
-        value: agent,
-      })),
-      ...io,
-    })
+  const id = await ui.select(
+    "Which coding agent should add the SDK?",
+    agents.map((agent) => ({ label: describeAgent(agent), value: agent.id }))
   );
+  const chosen = agents.find((agent) => agent.id === id);
+  if (!chosen) {
+    throw new Error(
+      "That coding agent is no longer available. Run the wizard again."
+    );
+  }
+  return chosen;
 }
 
-function treeWarning(tree: TreeState): string | null {
+function treeWarning(tree: TreeState): string | undefined {
   if (tree.kind === "dirty") {
     const files =
       tree.changedFiles === 1
@@ -131,161 +145,133 @@ function treeWarning(tree: TreeState): string | null {
   if (tree.kind === "not-a-repo") {
     return "This directory is not a Git repository. The agent is about to edit files, and there will be no diff to review afterwards and no way to undo them.";
   }
-  return null;
 }
 
-async function confirmTree(tree: TreeState, io: WizardIo): Promise<void> {
+async function confirmTree(tree: TreeState, ui: Ui): Promise<string> {
   const warning = treeWarning(tree);
   if (!warning) {
-    return;
+    return "clean";
   }
-  log.warn(warning, io);
-  const proceed = answered(
-    await confirm({ message: "Continue anyway?", ...io })
-  );
-  if (!proceed) {
+  ui.warn([warning]);
+  if (!(await ui.confirm("Continue anyway?"))) {
     throw new WizardStop("Stopped. Nothing was changed.");
   }
-}
-
-async function askPublisherKey(io: WizardIo): Promise<string> {
-  note(`Copy a publisher key from ${PUBLISHER_KEYS_URL}`, "Publisher key", io);
-  const answer = answered(
-    await text({
-      defaultValue: "",
-      message: "Paste your publisher key, or press Enter to skip",
-      placeholder: PLACEHOLDER_PUBLISHER_KEY,
-      ...io,
-    })
-  ).trim();
-  if (answer) {
-    return answer;
-  }
-  log.info(
-    `Skipped. ${PLACEHOLDER_PUBLISHER_KEY} goes in the env file for you to replace.`,
-    io
-  );
-  return PLACEHOLDER_PUBLISHER_KEY;
+  return tree.kind === "dirty" ? `${tree.changedFiles} changed` : "not a repo";
 }
 
 async function runTurn<Result>(
   context: TurnContext,
-  labels: TurnLabels,
+  step: number,
+  title: string,
   turn: (onActivity: (activity: AgentActivity) => void) => Promise<Result>
 ): Promise<Result> {
-  const { io, signal } = context;
-  const progress = spinner({ output: io.output, signal });
-  progress.start(labels.start);
+  const narrator = createNarrator(context.cwd);
+  context.ui.startTask(title);
   try {
     const result = await turn((activity) =>
-      progress.message(describeActivity(activity))
+      context.ui.activity(narrator.take(activity))
     );
-    progress.stop(labels.done);
+    // An agent that ignores the signal still finishes its turn, and going on
+    // to the next prompt would ignore a developer who asked to stop.
+    if (context.signal?.aborted) {
+      context.ui.fail(step, "stopped");
+      throw new WizardStop(STOPPED_MID_RUN);
+    }
+    context.ui.stopTask();
     return result;
   } catch (error) {
-    if (signal?.aborted) {
-      progress.cancel("Stopped");
-      throw new WizardStop(
-        "Stopped. The agent may already have changed files, so check git status.",
-        { cause: error }
-      );
+    if (error instanceof WizardStop) {
+      throw error;
     }
-    progress.error(labels.failed);
+    if (context.signal?.aborted) {
+      context.ui.fail(step, "stopped");
+      throw new WizardStop(STOPPED_MID_RUN, { cause: error });
+    }
+    context.ui.fail(step, `stopped after ${narrator.summary()}`);
     throw error;
   }
 }
 
 async function askForPlan(
   context: TurnContext,
-  prompt: string
-): Promise<string> {
-  const reply = await runTurn(
-    context,
-    {
-      done: "Read the project",
-      failed: "Could not read the project",
-      start: "Reading the project",
-    },
-    (onActivity) =>
-      context.conversation.ask(prompt, {
-        onActivity,
-        signal: context.signal,
-      })
+  step: number,
+  prompt: string,
+  title: string
+): Promise<Plan | undefined> {
+  const reply = await runTurn(context, step, title, (onActivity) =>
+    context.conversation.ask(prompt, {
+      onActivity,
+      schema: PLAN_SCHEMA,
+      signal: context.signal,
+    })
   );
-  return reply.trim();
+  return readPlan(reply.json);
 }
 
-/** An empty reply is worth one more ask before the run is a write-off. */
-async function planTurn(context: TurnContext, prompt: string): Promise<string> {
-  const plan = await askForPlan(context, prompt);
+/** A reply that is not a plan is worth one more ask before the run is lost. */
+async function planTurn(
+  context: TurnContext,
+  step: number,
+  prompt: string,
+  title: string
+): Promise<Plan> {
+  const plan = await askForPlan(context, step, prompt, title);
   if (plan) {
     return plan;
   }
-  const retried = await askForPlan(context, prompt);
+  const retried = await askForPlan(
+    context,
+    step,
+    prompt,
+    `${title} (second attempt)`
+  );
   if (retried) {
     return retried;
   }
+  context.ui.fail(step, "no plan");
   throw new Error(
-    `${describeAgent(context.agent)} replied with nothing, twice. Run the wizard again, or set the SDK up by hand: ${PUBLISHER_GUIDE}`
+    `${describeAgent(context.agent)} did not report a plan, twice. Run the wizard again, or set the SDK up by hand: ${PUBLISHER_GUIDE}`
   );
 }
 
-async function choosePlacements(
-  plan: string,
-  io: WizardIo
-): Promise<ChosenPlacements> {
-  const suggested = parsePlacements(plan);
+async function choosePlacements(plan: Plan, ui: Ui): Promise<ChosenPlacements> {
+  const suggested = plan.placements.map(placementLabel);
   if (suggested.length === 0) {
     return { dropped: [], kept: [] };
   }
-  const kept = answered(
-    await multiselect<string>({
-      initialValues: suggested,
-      message: "Which of these placements should the agent build?",
-      options: suggested.map((label) => ({ label, value: label })),
-      required: false,
-      ...io,
-    })
+  const kept = await ui.multiselect(
+    "Which of these placements should the agent build?",
+    suggested.map((label) => ({ label, value: label })),
+    suggested
   );
   return { dropped: suggested.filter((label) => !kept.includes(label)), kept };
 }
 
 async function approvePlan(
   context: TurnContext,
-  plan: string
+  plan: Plan
 ): Promise<ApprovedPlan> {
-  note(
-    `${renderPlan(plan)}\n\nNothing has been changed yet.`,
-    "Integration plan",
-    context.io
-  );
-  const placements = await choosePlacements(plan, context.io);
-  const decision = answered(
-    await select({
-      message: "Go ahead with this plan?",
-      options: [
-        { label: "Approve, make these changes", value: "approve" },
-        { label: "Change something first", value: "feedback" },
-        { label: "Abort, change nothing", value: "abort" },
-      ],
-      ...context.io,
-    })
-  );
-  if (decision === "approve") {
-    return { placements, plan };
-  }
+  const decision = await context.ui.review(plan, "Go ahead with this plan?", [
+    { label: "Approve, make these changes", value: "approve" },
+    { label: "Change something first", value: "feedback" },
+    { label: "Abort, change nothing", value: "abort" },
+  ]);
   if (decision === "abort") {
     throw new WizardStop("Aborted. Nothing was changed.");
   }
-  const feedback = answered(
-    await text({
-      defaultValue: "",
-      message: "What should the agent do differently?",
-      ...context.io,
-    })
+  if (decision === "approve") {
+    return { placements: await choosePlacements(plan, context.ui), plan };
+  }
+  const feedback = (
+    await context.ui.text("What should the agent do differently?")
   ).trim();
   const revised = feedback
-    ? await planTurn(context, feedbackPrompt(feedback))
+    ? await planTurn(
+        context,
+        REVIEW_STEP,
+        feedbackPrompt(feedback),
+        "Revising the plan"
+      )
     : plan;
   return await approvePlan(context, revised);
 }
@@ -293,95 +279,115 @@ async function approvePlan(
 async function implement(
   context: TurnContext,
   approved: ApprovedPlan,
-  publisherKey: string,
-  index: string
+  docs: Docs
 ): Promise<void> {
-  await runTurn(
-    context,
-    {
-      done: "Changes written",
-      failed: "Could not finish the changes",
-      start: "Adding the SDK",
-    },
-    (onActivity) =>
-      context.conversation.work(
-        implementPrompt({
-          index,
-          placements: approved.placements,
-          plan: approved.plan,
-          publisherKey,
-        }),
-        { onActivity, signal: context.signal }
-      )
+  await runTurn(context, WRITE_STEP, "Writing the changes", (onActivity) =>
+    context.conversation.work(
+      implementPrompt({
+        docs,
+        placements: approved.placements,
+        plan: approved.plan.details,
+      }),
+      { onActivity, signal: context.signal }
+    )
   );
 }
 
 async function closeQuietly(
   conversation: AgentConversation,
-  io: WizardIo
+  ui: Ui
 ): Promise<void> {
   try {
     await conversation.close();
   } catch (error) {
-    log.warn(
+    ui.warn([
       messageOf(
         error,
         "The coding agent session did not close cleanly. Check that it is not still running."
       ),
-      io
-    );
+    ]);
   }
 }
 
 async function reportChanges(
   cwd: string,
   tree: TreeState,
-  io: WizardIo
+  ui: Ui
 ): Promise<void> {
   if (tree.kind === "not-a-repo") {
-    note(
-      "This directory is not a Git repository, so there is no diff to show. Read the files the agent touched before you run anything.",
-      "Changes",
-      io
+    ui.keep(
+      "Changes\nThis directory is not a Git repository, so there is no diff to show. Read the files the agent touched before you run anything."
     );
     return;
   }
-  note(await summarizeChanges(cwd), "Changes", io);
+  ui.keep(`Changes\n${await summarizeChanges(cwd)}`);
 }
 
-async function wizard(options: WizardOptions, io: WizardIo): Promise<number> {
-  const { cwd, fetchImpl, seam, signal } = options;
+async function reportKey(cwd: string, ui: Ui): Promise<void> {
+  const files = await envFilesWithPlaceholder(cwd);
+  const where =
+    files.length > 0
+      ? `Replace ${PLACEHOLDER_PUBLISHER_KEY} in ${files.join(" and ")}`
+      : `Replace ${PLACEHOLDER_PUBLISHER_KEY} in the env file the agent wrote`;
+  ui.keep(
+    `\nAdd your publisher key\n${where} with a key from ${PUBLISHER_KEYS_URL}`
+  );
+}
+
+async function wizard(options: WizardOptions): Promise<number> {
+  const { cwd, fetchImpl, seam, signal, ui } = options;
+  ui.plan([...STEPS], shorten(cwd));
   const agents = await seam.detect();
   if (agents.length === 0) {
-    log.error(
-      `No supported coding agent was found. Install one, or add the SDK by hand with the manual guide: ${PUBLISHER_GUIDE}`,
-      io
-    );
+    const missing = `No supported coding agent was found. Install one, or add the SDK by hand with the manual guide: ${PUBLISHER_GUIDE}`;
+    ui.fail(AGENT_STEP, "none installed");
+    ui.error([missing]);
+    ui.keep(missing);
     return 1;
   }
 
-  const agent = await chooseAgent(agents, io);
+  ui.begin(AGENT_STEP);
+  const agent = await chooseAgent(agents, ui);
+  ui.finish(AGENT_STEP, describeAgent(agent));
+  contract(ui, agent);
+
+  ui.begin(TREE_STEP);
   const tree = await inspectWorkingTree(cwd);
-  await confirmTree(tree, io);
-  const publisherKey = await askPublisherKey(io);
+  ui.finish(TREE_STEP, await confirmTree(tree, ui));
+
+  ui.begin(READ_STEP);
   // Before the first turn, so a network failure costs nothing. A turn that
   // runs without the current API costs minutes and integrates the wrong thing.
-  const index = await fetchDocsIndex(fetchImpl);
+  const docs = await fetchDocs(fetchImpl);
 
   const conversation = seam.open(agent, cwd);
-  const context: TurnContext = { agent, conversation, io, signal };
+  const context: TurnContext = { agent, conversation, cwd, signal, ui };
   try {
-    const approved = await approvePlan(
+    const plan = await planTurn(
       context,
-      await planTurn(context, reconPrompt(index))
+      READ_STEP,
+      reconPrompt(docs),
+      "Reading the project"
     );
-    await implement(context, approved, publisherKey, index);
+    ui.finish(READ_STEP, plan.summary || undefined);
+
+    ui.begin(REVIEW_STEP);
+    const approved = await approvePlan(context, plan);
+    const kept = approved.placements.kept.length;
+    ui.finish(REVIEW_STEP, kept === 1 ? "1 placement" : `${kept} placements`);
+
+    // The opening contract has been read and acted on by now.
+    ui.clear();
+    ui.begin(WRITE_STEP);
+    await implement(context, approved, docs);
+    ui.finish(WRITE_STEP);
   } finally {
-    await closeQuietly(conversation, io);
+    await closeQuietly(conversation, ui);
   }
 
-  await reportChanges(cwd, tree, io);
-  outro("Done. Read the changes, then run your app.", io);
+  await reportChanges(cwd, tree, ui);
+  await reportKey(cwd, ui);
+  ui.keep("\nRead the changes, then run your app.");
   return 0;
 }
 
@@ -389,27 +395,32 @@ async function wizard(options: WizardOptions, io: WizardIo): Promise<number> {
  * Runs the whole wizard: detect an agent, plan the integration, and let it
  * make the changes once the developer approves the plan.
  *
- * @param options The agent seam, the project directory, and the streams every
- * prompt reads and writes.
+ * @param options The agent seam, the project directory, and the screen to
+ * drive. The caller owns the screen and closes it.
  * @returns The exit code for the caller to use. This never exits the process.
  */
 export async function runWizard(options: WizardOptions): Promise<number> {
-  const io = { input: options.input, output: options.output };
-  intro("Specify publisher SDK wizard", io);
+  const { ui, verbose } = options;
   try {
-    return await wizard(options, io);
+    return await wizard(options);
   } catch (error) {
-    if (error instanceof WizardStop) {
-      cancel(error.message, io);
+    if (error instanceof WizardCancelled || error instanceof WizardStop) {
+      const stopped = error.message;
+      ui.warn([stopped]);
+      ui.keep(stopped);
       return 0;
     }
-    log.error(
-      messageOf(
-        error,
-        "The wizard could not finish. Check your setup and try again."
-      ),
-      io
+    const message = messageOf(
+      error,
+      "The wizard could not finish. Check your setup and try again."
     );
+    ui.error([message]);
+    ui.keep(message);
+    if (verbose) {
+      for (const cause of causes(error)) {
+        ui.keep(`  caused by: ${cause}`);
+      }
+    }
     return 1;
   }
 }
