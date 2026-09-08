@@ -307,10 +307,7 @@ function Screen({ store }: { store: WizardStore }) {
   const state = useSyncExternalStore(store.subscribe, store.getState);
   const size = useTerminalSize();
   const rows = size.rows || DEFAULT_ROWS;
-  const width = Math.max(
-    MIN_WIDTH,
-    (size.columns || DEFAULT_WIDTH) - 2
-  );
+  const width = Math.max(MIN_WIDTH, (size.columns || DEFAULT_WIDTH) - 2);
 
   // The plan is the whole screen while it is being read; there is nothing
   // beside it worth crowding it out.
