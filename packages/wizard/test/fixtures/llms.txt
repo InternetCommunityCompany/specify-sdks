@@ -1,0 +1,46 @@
+# Specify
+
+Ads that advertisers only pay for when users convert onchain.
+
+## Advertising
+
+- [Ad Creatives Guide](/advertising/ad-creatives-guide): How to design ad creative that actually converts on Specify: specs, targeting strategy, testing, and content policy.
+- [Advertiser Step-by-Step Guide](/advertising/advertiser-step-by-step-guide): How to create your first ad campaign in Specify's self-serve platform.
+- [Analytics SDK setup](/advertising/analytics-sdk-setup): Install the Specify analytics SDK, wire consent, and start capturing funnel events on your own site.
+- [Analytics SDK reference](/advertising/analytics-sdk): Constructor, methods, captured events, and privacy posture for the optional Analytics SDK.
+- [Conversions](/advertising/conversions): How Specify defines, attributes, and audits conversions. Onchain by default, with optional offchain integrations for edge cases.
+- [Incrementality](/advertising/incrementality): What incrementality testing is, why it's the gold standard for measuring ad effectiveness, and how Specify runs it on every campaign.
+- [Pricing](/advertising/pricing): How Specify bills for campaigns: fixed and tiered volume-based pricing, both tied to real conversions.
+- [Review & Approval Process](/advertising/reviews): How Specify reviews organizations and campaigns before they go live.
+- [Sanpo Yoshi](/advertising/sanpo-yoshi): The three-way-good principle behind how Specify is built, and why it's the only sustainable model for web3 advertising.
+- [Targeting](/advertising/targeting): How Specify uses onchain behavioural targeting to reach the right users across chains, projects, and campaign goals.
+- [Test Campaign](/advertising/test-campaign): A fixed-price, no-commitment first campaign, with full targeting, conversion tracking, and an in-depth report you can actually act on.
+- [Where are ads shown?](/advertising/where-are-ads-shown): Where will my targeted users see my ads?
+
+## Legal
+
+- [Advertising Policy](/legal/advertising-policy): Advertising Policy for Specify
+- [Publisher Policy](/legal/publisher-policy): Publisher Policy for Specify
+- [Terms of Service](/legal/terms-of-service): Terms of Service for Specify
+
+## Publishing
+
+- [A/B testing with ad unit IDs](/publishing/ad-unit-ids): Label each placement so you can compare how they perform.
+- [API reference](/publishing/api-reference): Serve Specify ads through the HTTP API when you can't use the SDK or prefer raw requests.
+- [Get started](/publishing/get-started): Pick the guide that matches your stack.
+- [Google Tag Manager](/publishing/google-tag-manager): Install the Specify SDK with a Custom HTML tag, connect consent, and serve an ad through the command queue.
+- [JavaScript](/publishing/javascript): Add Specify to any JavaScript app.
+- [Migrating from v0.4.x](/publishing/migrating-from-v0-4): Move an existing publisher integration from @specify-sh/sdk to @specify-sh/publisher-sdk v1.
+- [Passing multiple wallets](/publishing/multiple-wallets): Send every address you know for a user.
+- [Next.js](/publishing/nextjs): Add Specify to a Next.js app.
+- [Payments](/publishing/payments): How Specify pays publishers, a guaranteed base CPM, tiered revenue share on top, and monthly payments in fiat or crypto.
+- [Placements](/publishing/placements): How to think about where Specify ads live in your app.
+- [Publisher keys](/publishing/publisher-keys): Create development and production keys, and where to put them in your app.
+- [React](/publishing/react): Add Specify to a React app.
+- [Reputation & Moderation](/publishing/reputation): How Specify protects publisher reputation, content standards, ad screening, and the controls you have over what runs on your platform.
+- [Recognising returning visitors](/publishing/returning-visitors): Serve ads after a wallet disconnects.
+- [Sanpo Yoshi](/publishing/sanpo-yoshi): The three-way-good principle behind how Specify is built, and why it's the only sustainable model for web3 advertising.
+- [Browser SDK](/publishing/sdk-browser): Reference for the Specify Browser SDK.
+- [SDK reference (v0.4.x)](/publishing/sdk-reference-v0): Archived reference for the v0.4.x JavaScript/TypeScript SDK. For new integrations, use the current SDK reference.
+- [Node.js SDK](/publishing/sdk-server): Reference for the Node.js SDK.
+- [Why Specify](/publishing/why-specify): The best eCPM rates in the industry, and the highest quality advertisers you'll find.

@@ -1,0 +1,35 @@
+{
+  "name": "@specify-sh/wizard",
+  "version": "0.0.0",
+  "description": "Add the Specify publisher SDK with your installed coding agent",
+  "homepage": "https://github.com/InternetCommunityCompany/specify-sdks#readme",
+  "bugs": "https://github.com/InternetCommunityCompany/specify-sdks/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/InternetCommunityCompany/specify-sdks.git",
+    "directory": "packages/wizard"
+  },
+  "license": "MIT",
+  "author": "Specify",
+  "type": "module",
+  "bin": {
+    "specify-wizard": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build.mts",
+    "types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.7.0",
+    "anyagent-js": "0.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
