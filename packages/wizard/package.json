@@ -1,6 +1,6 @@
 {
   "name": "@specify-sh/wizard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Add the Specify publisher SDK with your installed coding agent",
   "homepage": "https://github.com/InternetCommunityCompany/specify-sdks#readme",
   "bugs": "https://github.com/InternetCommunityCompany/specify-sdks/issues",
