@@ -242,6 +242,13 @@ function Review({
 
 function Prompt({ ask, answer }: { ask: Ask; answer: (reply: Reply) => void }) {
   const [draft, setDraft] = useState("");
+  // The selection is held here: handing MultiSelect a bare `value` prop makes
+  // it controlled by something that never changes, and Space would toggle
+  // nothing. A prompt mounts fresh for every question, so the initial set is
+  // picked up each time.
+  const [chosen, setChosen] = useState<string[]>(() =>
+    ask.kind === "multiselect" ? ask.initial : []
+  );
 
   if (ask.kind === "confirm") {
     return <Confirm message={ask.message} onSubmit={answer} />;
@@ -259,12 +266,18 @@ function Prompt({ ask, answer }: { ask: Ask; answer: (reply: Reply) => void }) {
   }
   if (ask.kind === "multiselect") {
     return (
-      <MultiSelect<string>
-        label={ask.message}
-        onSubmit={answer}
-        options={ask.options}
-        value={ask.initial}
-      />
+      <Box flexDirection="column">
+        <MultiSelect<string>
+          label={ask.message}
+          onChange={setChosen}
+          onSubmit={answer}
+          options={ask.options}
+          value={chosen}
+        />
+        <Box marginTop={1}>
+          <Text dimColor>Space toggles a placement, Enter confirms.</Text>
+        </Box>
+      </Box>
     );
   }
   return (
@@ -283,7 +296,11 @@ function entryRows(entry: Entry): number {
 
 /** How many rows the open prompt needs under everything else. */
 function askRows(ask: Ask): number {
-  if (ask.kind === "select" || ask.kind === "multiselect") {
+  if (ask.kind === "multiselect") {
+    // Options, label, and the toggle hint under them.
+    return ask.options.length + 4;
+  }
+  if (ask.kind === "select") {
     return ask.options.length + 2;
   }
   return 2;
