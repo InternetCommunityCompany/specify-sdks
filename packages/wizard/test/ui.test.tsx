@@ -202,6 +202,29 @@ describe("App", () => {
     view.unmount();
   });
 
+  it("toggles a placement off with Space before confirming", async () => {
+    const { store, view } = mount();
+    const kept = store.request<string[]>({
+      initial: ["app/page.tsx", "app/blog/page.tsx"],
+      kind: "multiselect",
+      message: "Which of these placements should the agent build?",
+      options: [
+        { label: "app/page.tsx", value: "app/page.tsx" },
+        { label: "app/blog/page.tsx", value: "app/blog/page.tsx" },
+      ],
+    });
+    await settle();
+    expect(view.lastFrame() ?? "").toContain(
+      "Space toggles a placement, Enter confirms."
+    );
+
+    // Space drops the highlighted first placement, Enter confirms the rest.
+    await type(view, " \r");
+
+    await expect(kept).resolves.toEqual(["app/blog/page.tsx"]);
+    view.unmount();
+  });
+
   it("submits the placements it was given as the initial choice", async () => {
     const { store, view } = mount();
     const kept = store.request<string[]>({
