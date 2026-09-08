@@ -16,7 +16,7 @@ const result = await build({
   drop: ["debugger"],
   entrypoints: ["./src/cli.ts"],
   env: "disable",
-  external: ["anyagent-js", "@clack/prompts"],
+  external: ["anyagent-js", "giggles", "ink", "react", "react/jsx-runtime"],
   format: "esm",
   minify: true,
   outdir: "./dist",

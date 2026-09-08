@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { inspectWorkingTree, summarizeChanges } from "../src/preflight";
+import {
+  envFilesWithPlaceholder,
+  inspectWorkingTree,
+  summarizeChanges,
+} from "../src/preflight";
 
 const directories: string[] = [];
 
@@ -88,5 +92,33 @@ describe("summarizeChanges", () => {
     await expect(summarizeChanges(temporaryDirectory())).resolves.toContain(
       "Review the changes with your own tools"
     );
+  });
+});
+
+describe("envFilesWithPlaceholder", () => {
+  it("names every env file the placeholder landed in", async () => {
+    const cwd = temporaryDirectory();
+    writeFileSync(join(cwd, ".env.local"), "KEY=spk_your_key_here\n");
+    writeFileSync(join(cwd, ".env"), "KEY=spk_your_key_here\n");
+    writeFileSync(join(cwd, ".env.production"), "KEY=spk_live_real\n");
+    writeFileSync(join(cwd, "config.ts"), "spk_your_key_here\n");
+
+    await expect(envFilesWithPlaceholder(cwd)).resolves.toEqual([
+      ".env",
+      ".env.local",
+    ]);
+  });
+
+  it("finds nothing when no env file holds the placeholder", async () => {
+    const cwd = temporaryDirectory();
+    writeFileSync(join(cwd, ".env"), "KEY=spk_live_real\n");
+
+    await expect(envFilesWithPlaceholder(cwd)).resolves.toEqual([]);
+  });
+
+  it("reports nothing rather than throwing when the directory is gone", async () => {
+    await expect(
+      envFilesWithPlaceholder(join(tmpdir(), "specify-wizard-missing"))
+    ).resolves.toEqual([]);
   });
 });

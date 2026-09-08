@@ -191,7 +191,7 @@ try {
   if (!wizardCli.startsWith("#!/usr/bin/env node")) {
     throw new Error("The packed wizard CLI must start with a Node shebang");
   }
-  for (const dependency of ["anyagent-js", "@clack/prompts"]) {
+  for (const dependency of ["anyagent-js", "giggles", "ink", "react"]) {
     if (!wizard.manifest.dependencies?.[dependency]) {
       throw new Error(`Wizard must declare ${dependency} in dependencies`);
     }
@@ -248,9 +248,9 @@ try {
     if (
       !(error instanceof Error && "status" in error) ||
       error.status !== 1 ||
-      !("stdout" in error) ||
-      typeof error.stdout !== "string" ||
-      !error.stdout.includes("needs a real terminal")
+      !("stderr" in error) ||
+      typeof error.stderr !== "string" ||
+      !error.stderr.includes("needs a real terminal")
     ) {
       throw error;
     }

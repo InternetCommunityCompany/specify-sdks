@@ -23,8 +23,14 @@
     "types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@clack/prompts": "1.7.0",
-    "anyagent-js": "0.4.0"
+    "anyagent-js": "0.4.0",
+    "giggles": "^0.7.3",
+    "ink": "^6.8.0",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "ink-testing-library": "^4.0.0"
   },
   "engines": {
     "node": ">=20"

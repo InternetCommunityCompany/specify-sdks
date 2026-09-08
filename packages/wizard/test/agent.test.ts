@@ -78,11 +78,14 @@ describe("anyAgentSeam", () => {
       conversation.ask("inspect", {
         onActivity: (activity) => activities.push(activity),
       })
-    ).resolves.toBe("## What I found\n\nA React app.\n");
+    ).resolves.toEqual({
+      json: null,
+      text: "## What I found\n\nA React app.\n",
+    });
     expect(agent.session).toHaveBeenCalledWith({ cwd: "/project" });
     expect(runMock).toHaveBeenCalledWith("inspect", { signal: undefined });
     expect(activities).toEqual([
-      { kind: "tool", name: "read" },
+      { input: undefined, kind: "tool", name: "read" },
       { change: "modify", kind: "file", path: "src/app.ts" },
     ]);
   });
@@ -118,7 +121,7 @@ describe("anyAgentSeam", () => {
 
     await expect(
       seam.open(detected, "/project").work("implement")
-    ).resolves.toBe("done");
+    ).resolves.toEqual({ json: {}, text: "done" });
     expect(session.respond).toHaveBeenCalledWith("request-1", "allow");
     expect(session.run).toHaveBeenCalledWith("implement", {
       signal: undefined,
