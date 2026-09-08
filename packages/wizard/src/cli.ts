@@ -7,7 +7,7 @@ import { runWizard } from "./wizard";
 const ADVERTISER_GUIDE =
   "https://docs.specify.sh/advertising/analytics-sdk-setup";
 const PUBLISHER_GUIDE = "https://docs.specify.sh/publishing/get-started";
-const USAGE = `specify-wizard [--publisher] [--verbose]
+const USAGE = `Usage: specify-wizard [--publisher] [--verbose]
 
 --advertiser  Not available yet
 --verbose     Show the cause of a failure
