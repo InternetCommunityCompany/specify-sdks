@@ -1,5 +1,11 @@
 # @specify-sh/publisher-sdk
 
+## 1.1.1
+
+### Patch Changes
+
+- 5ac411e: Ad requests no longer send cookies until `setCookieConsent(true)` is called, and stop sending them again once consent is withdrawn.
+
 ## 1.1.0
 
 ### Minor Changes
