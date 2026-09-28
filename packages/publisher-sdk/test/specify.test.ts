@@ -197,7 +197,7 @@ describe("Specify", () => {
       });
     });
 
-    it("includes credentials on the request", async () => {
+    it("omits credentials without consent", async () => {
       const specify = createSpecify();
       const { fetch } = setupMockFetch(mockAd);
 
@@ -207,8 +207,41 @@ describe("Specify", () => {
 
       expect(fetch).toHaveBeenCalledWith(
         "https://spfsrv.com/v1/ads",
-        expect.objectContaining({ credentials: "include" })
+        expect.objectContaining({ credentials: "omit" })
       );
+    });
+
+    describe.runIf(typeof window !== "undefined")("browser consent", () => {
+      it("includes credentials with consent", async () => {
+        const specify = createSpecify();
+        specify.setCookieConsent(true);
+        const { fetch } = setupMockFetch(mockAd);
+
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(fetch).toHaveBeenCalledWith(
+          "https://spfsrv.com/v1/ads",
+          expect.objectContaining({ credentials: "include" })
+        );
+      });
+
+      it("omits credentials again once consent is withdrawn", async () => {
+        const specify = createSpecify();
+        specify.setCookieConsent(true);
+        specify.setCookieConsent(false);
+        const { fetch } = setupMockFetch(mockAd);
+
+        await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(fetch).toHaveBeenCalledWith(
+          "https://spfsrv.com/v1/ads",
+          expect.objectContaining({ credentials: "omit" })
+        );
+      });
     });
 
     it("returns a 200 body exactly as received", async () => {
