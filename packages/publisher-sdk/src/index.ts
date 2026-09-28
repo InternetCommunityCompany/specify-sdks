@@ -271,7 +271,7 @@ export default class Specify {
     return await requestAd({
       adUnitId: options.adUnitId,
       cookieConsent: this.cookieConsent,
-      credentials: "include",
+      credentials: this.hasCookieConsent() ? "include" : "omit",
       imageFormat: options.imageFormat,
       publisherKey: this.publisherKey,
       walletAddresses,
