@@ -5,6 +5,7 @@ Client libraries for [Specify](https://specify.sh), the ad network for onchain a
 | Package | |
 | --- | --- |
 | [`@specify-sh/publisher-sdk`](https://www.npmjs.com/package/@specify-sh/publisher-sdk) | Serve ads in a browser, on a server, or from a React component |
+| [`@specify-sh/advertiser-sdk`](packages/advertiser-sdk) | Private scaffold with a local `health()` smoke check |
 | [`@specify-sh/wizard`](https://www.npmjs.com/package/@specify-sh/wizard) | `npx @specify-sh/wizard` adds the publisher SDK with your own coding agent |
 | `@specify-sh/core` | Shared internals. Not meant to be installed directly |
 
