@@ -23,6 +23,9 @@
     "packages/advertiser-sdk": {
       "name": "@specify-sh/advertiser-sdk",
       "version": "0.0.0",
+      "dependencies": {
+        "@specify-sh/core": "0.1.0",
+      },
     },
     "packages/core": {
       "name": "@specify-sh/core",

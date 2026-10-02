@@ -13,6 +13,7 @@ const result = await build({
   drop: ["debugger"],
   entrypoints: ["./src/index.ts"],
   env: "disable",
+  external: ["@specify-sh/core"],
   format: "esm",
   minify: true,
   outdir: "./dist",
