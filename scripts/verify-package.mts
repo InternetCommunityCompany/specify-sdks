@@ -83,7 +83,22 @@ try {
 
   const core = packPackage("packages/core", "core");
   const publisher = packPackage("packages/publisher-sdk", "publisher-sdk");
+  const advertiser = packPackage("packages/advertiser-sdk", "advertiser-sdk");
   const wizard = packPackage("packages/wizard", "wizard");
+
+  for (const file of [
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map",
+    "README.md",
+    "LICENSE",
+  ]) {
+    requireFile(advertiser.files, file);
+  }
+  if (advertiser.files.some((path) => path.startsWith("package/src/"))) {
+    throw new Error("Advertiser tarball must not contain source files");
+  }
 
   requireFile(core.files, "dist/index.js");
   requireFile(core.files, "dist/index.js.map");
@@ -271,6 +286,7 @@ try {
     join(consumerDirectory, "package.json"),
     JSON.stringify({
       dependencies: {
+        "@specify-sh/advertiser-sdk": `file:${advertiser.tarball}`,
         "@specify-sh/core": `file:${core.tarball}`,
         "@specify-sh/publisher-sdk": `file:${publisher.tarball}`,
         "@types/react": reactTypesVersion,
@@ -287,7 +303,7 @@ try {
     cwd: consumerDirectory,
     stdio: "inherit",
   });
-  console.log("Installed both local tarballs into an empty consumer");
+  console.log("Installed SDK tarballs into an empty consumer");
 
   writeFileSync(
     join(consumerDirectory, "consumer.ts"),
@@ -295,6 +311,12 @@ try {
 import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
 import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
 import { useSpecifyAd, type UseSpecifyAdOptions } from "@specify-sh/publisher-sdk/react";
+import Advertiser, { type Address as AdvertiserAddress, type SpecifyInitConfig as AdvertiserInitConfig } from "@specify-sh/advertiser-sdk";
+const advertiserConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key", getConsent: () => false };
+const advertiserClient = new Advertiser(advertiserConfig);
+const advertiserWallet: AdvertiserAddress = "0x1111111111111111111111111111111111111111";
+advertiserClient.identify(advertiserWallet);
+advertiserClient.identify([advertiserWallet]);
 const coreAddress: CoreAddress = "0x1234567890123456789012345678901234567890";
 const coreImageFormat: CoreImageFormatType = CoreImageFormat.LANDSCAPE;
 const coreRequest: AdRequest = { imageFormat: coreImageFormat, publisherKey: "spk_1234567890abcdef1234567890abcd", walletAddresses: [coreAddress] };
@@ -378,7 +400,11 @@ void WalletAdSlot;
       `import * as core from "@specify-sh/core";
 import Specify, * as browser from "@specify-sh/publisher-sdk";
 import * as server from "@specify-sh/publisher-sdk/server";
+import * as advertiser from "@specify-sh/advertiser-sdk";
 const sameKeys = (actual, expected) => JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(expected);
+if (!sameKeys(advertiser, ["default"])) process.exit(1);
+const advertiserClient = new advertiser.default({ advertiserKey: "advertiser-test-key", getConsent: () => false });
+advertiserClient.identify("0x1111111111111111111111111111111111111111");
 if (!sameKeys(core, ["ImageFormat", "MAX_WALLET_ADDRESSES", "ValidationError", "assertValidAddresses", "assertValidPublisherKey", "prepareWalletAddresses", "requestAd"])) process.exit(1);
 if (!sameKeys(browser, ["ImageFormat", "ValidationError", "default"])) process.exit(1);
 if (!sameKeys(server, ["ImageFormat", "ValidationError", "serve"])) process.exit(1);
@@ -389,6 +415,41 @@ if (browser.ValidationError !== core.ValidationError || server.ValidationError !
     { cwd: consumerDirectory, stdio: "inherit" }
   );
   console.log("Verified runtime exports and shared core identity");
+
+  writeFileSync(
+    join(consumerDirectory, "advertiser-browser.ts"),
+    `import Advertiser from "@specify-sh/advertiser-sdk";
+const advertiserClient = new Advertiser({ advertiserKey: "advertiser-test-key", getConsent: () => false });
+advertiserClient.identify("0x1111111111111111111111111111111111111111");`
+  );
+  execFileSync(
+    "bun",
+    [
+      "build",
+      "advertiser-browser.ts",
+      "--target=browser",
+      "--outfile=advertiser-browser.js",
+    ],
+    { cwd: consumerDirectory, stdio: "inherit" }
+  );
+  execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
+const dom = new JSDOM("", { runScripts: "outside-only" });
+try {
+  dom.window.eval(readFileSync(process.argv[1], "utf8"));
+} finally {
+  dom.window.close();
+}`,
+      join(consumerDirectory, "advertiser-browser.js"),
+    ],
+    { stdio: "inherit" }
+  );
+  console.log("Verified packed advertiser SDK in Node and a browser bundle");
 
   const guardMessage = execFileSync(
     "node",

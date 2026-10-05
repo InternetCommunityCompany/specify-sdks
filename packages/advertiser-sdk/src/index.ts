@@ -8,26 +8,29 @@ const CAPTURE_URL = "https://spfsrv.com/v1/events";
 
 export type Address = CoreAddress;
 
-/**
- * Checks that the SDK is callable in the current environment.
- *
- * @returns True. This is a local smoke check and does not contact Specify.
- */
-export function health(): boolean {
-  return true;
-}
+/** Capture confirmation, with a message explaining skipped or unconfirmed events. */
+export type CaptureResult =
+  | { success: true; error: null }
+  | {
+      success: false;
+      error: string;
+      /** Request fields that failed validation. */
+      details?: { field: string; message: string }[];
+    };
 
 /** Configuration for the browser-only advertiser client. */
 export interface SpecifyInitConfig {
   /** Your organization's advertiser key. */
   advertiserKey: string;
+  /** Reads the current tracking consent from your consent manager. */
+  getConsent: () => boolean;
 }
 
 /** Browser-only Specify advertiser client. */
 export default class Specify {
   private readonly advertiserKey: string = "";
 
-  private cookieConsent = false;
+  private readonly getConsent: () => boolean = () => false;
 
   private readonly identifiedAddresses = new Set<Address>();
 
@@ -35,13 +38,14 @@ export default class Specify {
    * Creates an advertiser client without sending requests or writing storage.
    * Invalid configuration or construction outside a browser leaves it inactive.
    *
-   * @param config - Configuration containing your organization's advertiser key.
+   * @param config - Advertiser key and a getter for the current tracking consent.
    */
   constructor(config: SpecifyInitConfig) {
     if (typeof window === "undefined") {
       return;
     }
     try {
+      this.getConsent = config.getConsent;
       this.advertiserKey = config.advertiserKey;
       if (
         typeof this.advertiserKey !== "string" ||
@@ -52,23 +56,6 @@ export default class Specify {
     } catch {
       this.advertiserKey = "";
     }
-  }
-
-  /**
-   * Sets whether the user consented to Specify tracking.
-   *
-   * Consent starts false. Call this when your consent manager reports a choice
-   * or a change, including restoring a saved choice on each page load. This only
-   * updates the client; it sends no requests and writes no storage. Does nothing
-   * outside a browser.
-   *
-   * @param granted - Whether the user consented to Specify tracking.
-   */
-  setCookieConsent(granted: boolean): void {
-    if (typeof window === "undefined" || this.cookieConsent === granted) {
-      return;
-    }
-    this.cookieConsent = granted === true;
   }
 
   /**
@@ -118,19 +105,35 @@ export default class Specify {
    * Does nothing outside a browser.
    *
    * @param name - The nonempty name of the product event to record.
-   * @returns True when Specify confirms storage; false when skipped or unconfirmed.
+   * @returns Success when Specify validates a development capture or confirms
+   * production storage; otherwise a failure with a message explaining what to check.
    */
-  async capture(name: string): Promise<boolean> {
+  async capture(name: string): Promise<CaptureResult> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      if (
-        typeof window === "undefined" ||
-        !this.cookieConsent ||
-        !this.advertiserKey ||
-        typeof name !== "string" ||
-        name.length === 0
-      ) {
-        return false;
+      if (typeof window === "undefined") {
+        return {
+          error: "Event capture is only available in a browser.",
+          success: false,
+        };
+      }
+      if (this.getConsent() !== true) {
+        return {
+          error: "Tracking consent is required.",
+          success: false,
+        };
+      }
+      if (!this.advertiserKey) {
+        return {
+          error: "Advertiser key is required.",
+          success: false,
+        };
+      }
+      if (typeof name !== "string" || name.length === 0) {
+        return {
+          error: "Request validation failed.",
+          success: false,
+        };
       }
 
       const controller = globalThis.AbortController
@@ -164,9 +167,12 @@ export default class Specify {
         signal: controller?.signal,
       });
 
-      return response.status === 200;
+      return (await response.json()) as CaptureResult;
     } catch {
-      return false;
+      return {
+        error: "Capture could not be confirmed.",
+        success: false,
+      };
     } finally {
       clearTimeout(timeout);
     }
