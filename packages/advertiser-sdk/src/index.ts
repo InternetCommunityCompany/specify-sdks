@@ -35,8 +35,7 @@ export default class Specify {
   private readonly identifiedAddresses = new Set<Address>();
 
   /**
-   * Creates an advertiser client without sending requests or writing storage.
-   * Invalid configuration or construction outside a browser leaves it inactive.
+   * Creates a browser advertiser client.
    *
    * @param config - Advertiser key and a getter for the current tracking consent.
    */
@@ -59,12 +58,7 @@ export default class Specify {
   }
 
   /**
-   * Remembers wallets to include in later event captures, without sending them.
-   *
-   * Call when a wallet connects, is restored, or changes. Disconnecting does not
-   * remove wallets. The 50 most recently identified addresses are retained.
-   * Invalid input is ignored without changing the remembered wallets. Does
-   * nothing outside a browser.
+   * Identifies wallets for subsequent event captures.
    *
    * @param addressOrAddresses - One wallet address, an array, or nothing.
    */
@@ -95,18 +89,10 @@ export default class Specify {
   }
 
   /**
-   * Captures one named product event with the current page URL and remembered wallets.
-   *
-   * Requires consent. With no remembered wallets, Specify checks its identity
-   * cookie and discards the event if it cannot identify the user. Sends once,
-   * without buffering or retries, and times out after 60 seconds when the browser
-   * supports AbortController. Withdrawing consent blocks new captures;
-   * requests already sent may still complete.
-   * Does nothing outside a browser.
+   * Captures a named product event.
    *
    * @param name - The nonempty name of the product event to record.
-   * @returns Success when Specify validates a development capture or confirms
-   * production storage; otherwise a failure with a message explaining what to check.
+   * @returns Whether the request was accepted, or a failure message.
    */
   async capture(name: string): Promise<CaptureResult> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -167,7 +153,12 @@ export default class Specify {
         signal: controller?.signal,
       });
 
-      return (await response.json()) as CaptureResult;
+      return response.ok
+        ? { error: null, success: true }
+        : {
+            error: `Capture could not be confirmed (HTTP ${response.status}).`,
+            success: false,
+          };
     } catch {
       return {
         error: "Capture could not be confirmed.",

@@ -27,10 +27,6 @@ bun run test
 bun run build
 ```
 
-For browser-to-Edge advertiser scenarios with mocked storage, see
-[the functional test setup](test/e2e/README.md) and run `bun run test:e2e`.
-These tests need the adjacent Edge checkout and Chromium, but no live services.
-
 Changes to a package's public exports need a changeset:
 
 ```bash
