@@ -20,9 +20,9 @@ const specify = new Specify({
 
 specify.identify('0x1111111111111111111111111111111111111111');
 
-const result = await specify.capture('user_signed_up');
-if (!result.success) {
-  console.error(result.error);
+const status = await specify.capture('user_signed_up');
+if (status !== 200) {
+  console.error(status === null ? 'No HTTP response.' : `HTTP ${status}`);
 }
 ```
 
@@ -52,10 +52,13 @@ Sends a named event with the current page URL and remembered wallets. The
 request includes available Specify identity cookies. Event names must be
 nonempty strings.
 
-Resolves to `{ success: true, error: null }` for a successful HTTP response,
-or `{ success: false, error: string }` when capture is blocked, rejected, or
-unconfirmed. It never throws or logs automatically. Error messages are for
-developers and should not be parsed as error codes.
+Resolves to the numeric HTTP status code without reading the response body:
+`200` accepted, `400` invalid request or missing identity, `401` invalid key,
+`403` missing consent, `429` rate limit exceeded, or `503` service unavailable.
+
+Returns `null` when no HTTP response is received: server-side calls, blocked
+consent, missing keys, invalid event names, throwing consent getters, network
+failures, or timeouts. It never throws or logs automatically.
 
 Requests time out after 60 seconds when `AbortController` is available.
 Delivery is best-effort, with no buffering or automatic retries. Withdrawing

@@ -68,10 +68,7 @@ describe("advertiser SDK initialization", () => {
       });
 
       client.identify("0x1111111111111111111111111111111111111111");
-      await expect(client.capture("purchase")).resolves.toEqual({
-        error: "Event capture is only available in a browser.",
-        success: false,
-      });
+      await expect(client.capture("purchase")).resolves.toBeNull();
       expect(readKey).not.toHaveBeenCalled();
       expect(readConsent).not.toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -82,7 +79,7 @@ describe("advertiser SDK initialization", () => {
 describe.runIf(typeof window !== "undefined")(
   "advertiser browser capture",
   () => {
-    it.each([204, 400, 401, 403, 503])(
+    it.each([200, 400, 401, 403, 429, 503])(
       "handles an empty %s response without reading JSON",
       async (status) => {
         const response = new Response(null, { status });
@@ -93,14 +90,7 @@ describe.runIf(typeof window !== "undefined")(
           getConsent: () => true,
         });
 
-        await expect(client.capture("purchase")).resolves.toEqual(
-          status === 204
-            ? { error: null, success: true }
-            : {
-                error: `Capture could not be confirmed (HTTP ${status}).`,
-                success: false,
-              }
-        );
+        await expect(client.capture("purchase")).resolves.toBe(status);
         expect(json).not.toHaveBeenCalled();
       }
     );
@@ -117,20 +107,20 @@ describe.runIf(typeof window !== "undefined")(
         .mockReturnValueOnce(true);
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response(null, { status: 204 }));
+        .mockResolvedValue(new Response(null, { status: 200 }));
       const client = new Specify({
         advertiserKey: "advertiser-test-key",
         getConsent,
       });
 
-      expect((await client.capture("purchase")).success).toBe(false);
+      await expect(client.capture("purchase")).resolves.toBeNull();
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect((await client.capture("purchase")).success).toBe(true);
+      await expect(client.capture("purchase")).resolves.toBe(200);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect((await client.capture("purchase")).success).toBe(false);
-      expect((await client.capture("purchase")).success).toBe(false);
+      await expect(client.capture("purchase")).resolves.toBeNull();
+      await expect(client.capture("purchase")).resolves.toBeNull();
       expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect((await client.capture("purchase")).success).toBe(true);
+      await expect(client.capture("purchase")).resolves.toBe(200);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       expect(getConsent).toHaveBeenCalledTimes(5);
     });
@@ -138,7 +128,7 @@ describe.runIf(typeof window !== "undefined")(
     it("sends the request contract with the current URL and client wallets", async () => {
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response(null, { status: 204 }));
+        .mockResolvedValue(new Response(null, { status: 200 }));
       const config = {
         advertiserKey: "advertiser-test-key",
         getConsent: () => true,
@@ -188,7 +178,7 @@ describe.runIf(typeof window !== "undefined")(
     it("retains recent wallets, rejects invalid batches, and isolates clients", async () => {
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response(null, { status: 204 }));
+        .mockResolvedValue(new Response(null, { status: 200 }));
       const config = {
         advertiserKey: "advertiser-test-key",
         getConsent: () => true,
@@ -219,23 +209,18 @@ describe.runIf(typeof window !== "undefined")(
     it.each([
       {
         advertiserKey: "   ",
-        error: "Advertiser key is required.",
         name: "purchase",
       },
       {
         advertiserKey: "advertiser-test-key",
-        error: "Request validation failed.",
         name: "",
       },
     ])(
-      "blocks local input errors: $error",
-      async ({ advertiserKey, name, error }) => {
+      "returns null without a request for key '$advertiserKey' and event '$name'",
+      async ({ advertiserKey, name }) => {
         const fetchSpy = vi.spyOn(globalThis, "fetch");
         const client = new Specify({ advertiserKey, getConsent: () => true });
-        await expect(client.capture(name)).resolves.toEqual({
-          error,
-          success: false,
-        });
+        await expect(client.capture(name)).resolves.toBeNull();
         expect(fetchSpy).not.toHaveBeenCalled();
       }
     );
@@ -244,21 +229,15 @@ describe.runIf(typeof window !== "undefined")(
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
         .mockRejectedValueOnce(new Error("Connection lost"))
-        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
       const client = new Specify({
         advertiserKey: "advertiser-test-key",
         getConsent: () => true,
       });
 
-      await expect(client.capture("purchase")).resolves.toEqual({
-        error: "Capture could not be confirmed.",
-        success: false,
-      });
+      await expect(client.capture("purchase")).resolves.toBeNull();
       expect(fetchSpy).toHaveBeenCalledTimes(1);
-      await expect(client.capture("purchase")).resolves.toEqual({
-        error: null,
-        success: true,
-      });
+      await expect(client.capture("purchase")).resolves.toBe(200);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
@@ -278,7 +257,7 @@ describe.runIf(typeof window !== "undefined")(
               });
             })
         )
-        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
         .mockRejectedValueOnce(new Error("Connection lost"));
       const client = new Specify({
         advertiserKey: "advertiser-test-key",
@@ -292,20 +271,11 @@ describe.runIf(typeof window !== "undefined")(
       expect(vi.getTimerCount()).toBe(1);
       await vi.advanceTimersByTimeAsync(1);
       expect(signal?.aborted).toBe(true);
-      await expect(capture).resolves.toEqual({
-        error: "Capture could not be confirmed.",
-        success: false,
-      });
+      await expect(capture).resolves.toBeNull();
       expect(vi.getTimerCount()).toBe(0);
-      await expect(client.capture("purchase")).resolves.toEqual({
-        error: null,
-        success: true,
-      });
+      await expect(client.capture("purchase")).resolves.toBe(200);
       expect(vi.getTimerCount()).toBe(0);
-      await expect(client.capture("purchase")).resolves.toEqual({
-        error: "Capture could not be confirmed.",
-        success: false,
-      });
+      await expect(client.capture("purchase")).resolves.toBeNull();
       expect(vi.getTimerCount()).toBe(0);
       expect(fetchSpy).toHaveBeenCalledTimes(3);
     });

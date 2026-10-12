@@ -8,16 +8,6 @@ const CAPTURE_URL = "https://spfsrv.com/v1/events";
 
 export type Address = CoreAddress;
 
-/** Capture confirmation, with a message explaining skipped or unconfirmed events. */
-export type CaptureResult =
-  | { success: true; error: null }
-  | {
-      success: false;
-      error: string;
-      /** Request fields that failed validation. */
-      details?: { field: string; message: string }[];
-    };
-
 /** Configuration for the browser-only advertiser client. */
 export interface SpecifyInitConfig {
   /** Your organization's advertiser key. */
@@ -92,34 +82,18 @@ export default class Specify {
    * Captures a named product event.
    *
    * @param name - The nonempty name of the product event to record.
-   * @returns Whether the request was accepted, or a failure message.
+   * @returns The HTTP status code, or null when no HTTP response is received.
    */
-  async capture(name: string): Promise<CaptureResult> {
+  async capture(name: string): Promise<number | null> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      if (typeof window === "undefined") {
-        return {
-          error: "Event capture is only available in a browser.",
-          success: false,
-        };
-      }
-      if (this.getConsent() !== true) {
-        return {
-          error: "Tracking consent is required.",
-          success: false,
-        };
-      }
-      if (!this.advertiserKey) {
-        return {
-          error: "Advertiser key is required.",
-          success: false,
-        };
-      }
-      if (typeof name !== "string" || name.length === 0) {
-        return {
-          error: "Request validation failed.",
-          success: false,
-        };
+      if (
+        typeof window === "undefined" ||
+        this.getConsent() !== true ||
+        !this.advertiserKey ||
+        name.length === 0
+      ) {
+        return null;
       }
 
       const controller = globalThis.AbortController
@@ -153,17 +127,9 @@ export default class Specify {
         signal: controller?.signal,
       });
 
-      return response.ok
-        ? { error: null, success: true }
-        : {
-            error: `Capture could not be confirmed (HTTP ${response.status}).`,
-            success: false,
-          };
+      return response.status;
     } catch {
-      return {
-        error: "Capture could not be confirmed.",
-        success: false,
-      };
+      return null;
     } finally {
       clearTimeout(timeout);
     }
