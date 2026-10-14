@@ -1,283 +1,474 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Specify, { type Address, type SpecifyInitConfig } from "../src";
 
+const WALLET_A = "0x1111111111111111111111111111111111111111";
+const WALLET_B = "0x2222222222222222222222222222222222222222";
+
+function mockService(status = 200) {
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response(null, { status }));
+}
+
+function bodies(fetchSpy: ReturnType<typeof mockService>) {
+  return fetchSpy.mock.calls.map(([, request]) =>
+    JSON.parse(String(request?.body))
+  );
+}
+
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
-describe("advertiser SDK initialization", () => {
-  it("exports only the client at runtime in the host environment", async () => {
-    const sdk = await import("../src");
-
-    expect(Object.keys(sdk)).toEqual(["default"]);
+describe("advertiser browser API", () => {
+  it("exports only the client at runtime", async () => {
+    expect(Object.keys(await import("../src"))).toEqual(["default"]);
   });
 
-  it("initializes and identifies without contacting the service", () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    try {
-      const client = new Specify({
-        advertiserKey: "advertiser-test-key",
-        getConsent: () => false,
-      });
-      expect(client).toBeInstanceOf(Specify);
-      client.identify("0x1111111111111111111111111111111111111111");
-      client.identify("0x2222222222222222222222222222222222222222");
-      expect(fetchSpy).not.toHaveBeenCalled();
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it("contains malformed configuration and throwing host accessors", () => {
-    const configurations = [
+  it("contains malformed configuration", () => {
+    for (const config of [
       undefined,
       null,
       {},
-      { advertiserKey: 123 },
-      { advertiserKey: "" },
-      { advertiserKey: "   " },
+      { advertiserKey: 1 },
       {
         get advertiserKey() {
-          throw new Error("Host configuration unavailable");
+          throw new Error("Host unavailable");
         },
       },
-    ];
-    for (const config of configurations) {
-      expect(() => new Specify(config as SpecifyInitConfig)).not.toThrow();
+    ]) {
+      expect(
+        () => new Specify(config as unknown as SpecifyInitConfig)
+      ).not.toThrow();
     }
   });
 
-  it.runIf(typeof window === "undefined")(
-    "keeps server calls inactive without reading host configuration",
-    async () => {
-      const readKey = vi.fn(() => {
-        throw new Error("Host key unavailable");
-      });
-      const readConsent = vi.fn(() => {
-        throw new Error("Host consent unavailable");
-      });
-      const fetchSpy = vi.spyOn(globalThis, "fetch");
-      const client = new Specify({
-        get advertiserKey() {
-          return readKey();
-        },
-        get getConsent() {
-          return readConsent();
-        },
-      });
+  it("uses an explicit capture identity only for that event", async () => {
+    vi.stubGlobal("window", {
+      location: { href: "https://shop.example/purchase" },
+    });
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: "key" });
+    await client.identify("remembered");
+    await client.identify(WALLET_A);
+    await client.capture("user_override", "other");
+    await client.capture("wallet_override", WALLET_B);
+    await expect(client.capture("invalid", "0xbroken")).resolves.toBeNull();
+    client.setCookieConsent(true);
+    await client.capture("remembered_identity");
 
-      client.identify("0x1111111111111111111111111111111111111111");
+    const [, userOverride, walletOverride, remembered] = bodies(fetchSpy);
+    expect(userOverride).toMatchObject({
+      userId: "other",
+      walletAddresses: [],
+    });
+    expect(walletOverride).toMatchObject({ walletAddresses: [WALLET_B] });
+    expect(walletOverride).not.toHaveProperty("userId");
+    expect(remembered).toMatchObject({
+      userId: "remembered",
+      walletAddresses: [WALLET_A],
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it.runIf(typeof window === "undefined")(
+    "contains server calls without identity and ignores browser consent",
+    async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      client.setCookieConsent(true);
+      await expect(client.identify()).resolves.toBeNull();
+      await expect(client.identify(null)).resolves.toBeNull();
       await expect(client.capture("purchase")).resolves.toBeNull();
-      expect(readKey).not.toHaveBeenCalled();
-      expect(readConsent).not.toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
     }
   );
 });
 
 describe.runIf(typeof window !== "undefined")(
-  "advertiser browser capture",
+  "browser identification and buffering",
   () => {
-    it.each([200, 400, 401, 403, 429, 503])(
-      "handles an empty %s response without reading JSON",
+    it("waits for consent and identifies without recording an event", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      await expect(client.identify(" Customer ")).resolves.toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      client.setCookieConsent(true);
+      await client.capture("purchase");
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+        "http://localhost:3000/v1/identify",
+        "http://localhost:3000/v1/events",
+      ]);
+      const [identity, event] = bodies(fetchSpy);
+      expect(identity).toEqual({
+        cookieConsent: true,
+        source: "browser",
+        userId: " Customer ",
+        walletAddresses: [],
+      });
+      expect(event.userId).toBe(" Customer ");
+      expect(
+        fetchSpy.mock.calls.every(
+          ([, request]) => request?.credentials === "include"
+        )
+      ).toBe(true);
+    });
+
+    it.each([200, 204, 400, 401, 403, 429, 503])(
+      "returns raw %s for both network methods",
       async (status) => {
         const response = new Response(null, { status });
         const json = vi.spyOn(response, "json");
         vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
-        const client = new Specify({
-          advertiserKey: "advertiser-test-key",
-          getConsent: () => true,
-        });
-
+        const client = new Specify({ advertiserKey: "key" });
+        client.setCookieConsent(true);
+        await expect(client.identify("customer")).resolves.toBe(status);
         await expect(client.capture("purchase")).resolves.toBe(status);
         expect(json).not.toHaveBeenCalled();
       }
     );
 
-    it("reads consent changes and recovers from a throwing getter", async () => {
-      const getConsent = vi
-        .fn()
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(true)
-        .mockReturnValueOnce(false)
-        .mockImplementationOnce(() => {
-          throw new Error("Consent unavailable");
-        })
-        .mockReturnValueOnce(true);
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response(null, { status: 200 }));
-      const client = new Specify({
-        advertiserKey: "advertiser-test-key",
-        getConsent,
-      });
-
-      await expect(client.capture("purchase")).resolves.toBeNull();
-      expect(fetchSpy).not.toHaveBeenCalled();
-      await expect(client.capture("purchase")).resolves.toBe(200);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      await expect(client.capture("purchase")).resolves.toBeNull();
-      await expect(client.capture("purchase")).resolves.toBeNull();
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      await expect(client.capture("purchase")).resolves.toBe(200);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-      expect(getConsent).toHaveBeenCalledTimes(5);
+    it("clears wallets and user ID without a network request", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      await client.identify("A");
+      await client.identify([WALLET_A, WALLET_B]);
+      await client.identify(null);
+      client.setCookieConsent(true);
+      await client.capture("cookie_only");
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(bodies(fetchSpy)[0]).toMatchObject({ walletAddresses: [] });
+      expect(bodies(fetchSpy)[0]).not.toHaveProperty("userId");
     });
 
-    it("sends the request contract with the current URL and client wallets", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response(null, { status: 200 }));
-      const config = {
-        advertiserKey: "advertiser-test-key",
-        getConsent: () => true,
-      };
-      const client = new Specify(config);
-      const wallet = "0x1111111111111111111111111111111111111111";
+    it("buffers capture snapshots and drains them once in order", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
       const originalUrl = window.location.href;
-      client.identify(wallet);
       try {
-        window.history.replaceState(null, "", "/signup");
-        const signupUrl = window.location.href;
-        await client.capture("purchase");
-        window.history.replaceState(null, "", "/checkout");
-        const checkoutUrl = window.location.href;
-        await client.capture("purchase");
-        for (const [index, url] of [signupUrl, checkoutUrl].entries()) {
-          expect(fetchSpy).toHaveBeenNthCalledWith(
-            index + 1,
-            "https://spfsrv.com/v1/events",
-            {
-              body: JSON.stringify({
-                cookieConsent: true,
-                event: { name: "purchase", url },
-                walletAddresses: [wallet],
-              }),
-              credentials: "include",
-              headers: {
-                "Content-Type": "application/json",
-                "x-api-key": config.advertiserKey,
-              },
-              keepalive: true,
-              method: "POST",
-              signal: expect.any(AbortSignal),
-            }
-          );
-        }
-        await new Specify(config).capture("purchase");
-        const [, request] = fetchSpy.mock.calls[2];
-        expect(JSON.parse(String(request?.body)).walletAddresses).toEqual([]);
-        expect(request?.credentials).toBe("include");
-        expect(fetchSpy).toHaveBeenCalledTimes(3);
+        window.history.replaceState(
+          null,
+          "",
+          "/first?spclk=one&spclk=two#receipt"
+        );
+        const firstUrl = window.location.href;
+        await client.identify("A");
+        await client.identify(WALLET_A);
+        await expect(client.capture("first")).resolves.toBeNull();
+        await client.identify(null);
+        await client.identify("B");
+        await client.identify(WALLET_B);
+        window.history.replaceState(null, "", "/second?keep=yes");
+        const secondUrl = window.location.href;
+        await expect(client.capture("second")).resolves.toBeNull();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        client.setCookieConsent(true);
+        await client.capture("third");
+        client.setCookieConsent(true);
+        const [identity, first, second, third] = bodies(fetchSpy);
+        expect(identity.userId).toBe("B");
+        expect(first).toMatchObject({
+          event: { name: "first", url: firstUrl },
+          spclk: "one",
+          userId: "A",
+          walletAddresses: [WALLET_A],
+        });
+        expect(second).toMatchObject({
+          event: { name: "second", url: secondUrl },
+          userId: "B",
+          walletAddresses: [WALLET_B],
+        });
+        expect(third.event.name).toBe("third");
+        expect(fetchSpy).toHaveBeenCalledTimes(4);
       } finally {
         window.history.replaceState(null, "", originalUrl);
       }
     });
 
-    it("retains recent wallets, rejects invalid batches, and isolates clients", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response(null, { status: 200 }));
-      const config = {
-        advertiserKey: "advertiser-test-key",
-        getConsent: () => true,
-      };
-      const client = new Specify(config);
-      const wallets = Array.from(
-        { length: 51 },
-        (_, index) => `0x${index.toString(16).padStart(40, "0")}` as Address
-      );
-      client.identify(wallets[0]);
-      client.identify(wallets.slice(1, 50));
-      client.identify(wallets[0]);
-      client.identify(wallets[50]);
-      client.identify([wallets[1], "invalid" as Address]);
-      client.identify(null);
-      client.identify(undefined);
-
-      await client.capture("purchase");
-      expect(
-        JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)).walletAddresses
-      ).toEqual([...wallets.slice(2, 50), wallets[0], wallets[50]]);
-      await new Specify(config).capture("purchase");
-      expect(
-        JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).walletAddresses
-      ).toEqual([]);
+    it("flushes buffered captures when granted even without pending identification", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      await client.capture("cookie_only");
+      client.setCookieConsent(true);
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+      expect(bodies(fetchSpy)[0].event.name).toBe("cookie_only");
     });
 
-    it.each([
-      {
-        advertiserKey: "   ",
-        name: "purchase",
-      },
-      {
-        advertiserKey: "advertiser-test-key",
-        name: "",
-      },
-    ])(
-      "returns null without a request for key '$advertiserKey' and event '$name'",
-      async ({ advertiserKey, name }) => {
-        const fetchSpy = vi.spyOn(globalThis, "fetch");
-        const client = new Specify({ advertiserKey, getConsent: () => true });
-        await expect(client.capture(name)).resolves.toBeNull();
-        expect(fetchSpy).not.toHaveBeenCalled();
-      }
-    );
+    it("serializes identification before capture so cookies can reach later requests", async () => {
+      const fetchSpy = mockService();
+      let finish: ((value: Response) => void) | undefined;
+      fetchSpy.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const client = new Specify({ advertiserKey: "key" });
+      client.setCookieConsent(true);
+      const identification = client.identify("A");
+      const capture = client.capture("purchase");
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      finish?.(new Response(null, { status: 200 }));
+      await expect(identification).resolves.toBe(200);
+      await expect(capture).resolves.toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
 
-    it("contains transport failure without retrying and recovers on the next capture", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockRejectedValueOnce(new Error("Connection lost"))
-        .mockResolvedValueOnce(new Response(null, { status: 200 }));
-      const client = new Specify({
-        advertiserKey: "advertiser-test-key",
-        getConsent: () => true,
+    it("cancels unsent identification on reset while preserving captured snapshots", async () => {
+      const fetchSpy = mockService();
+      let finish: ((value: Response) => void) | undefined;
+      fetchSpy.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const client = new Specify({ advertiserKey: "key" });
+      client.setCookieConsent(true);
+      const sentIdentification = client.identify("A");
+      const pendingIdentification = client.identify("B");
+      const pendingCapture = client.capture("before_reset");
+
+      await expect(client.identify(null)).resolves.toBeNull();
+      finish?.(new Response(null, { status: 200 }));
+
+      await expect(sentIdentification).resolves.toBe(200);
+      await expect(pendingIdentification).resolves.toBeNull();
+      await expect(pendingCapture).resolves.toBe(200);
+      await expect(client.capture("after_reset")).resolves.toBe(200);
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+        "http://localhost:3000/v1/identify",
+        "http://localhost:3000/v1/events",
+        "http://localhost:3000/v1/events",
+      ]);
+      expect(bodies(fetchSpy)[1]).toMatchObject({
+        event: { name: "before_reset" },
+        userId: "B",
       });
+      expect(bodies(fetchSpy)[2]).not.toHaveProperty("userId");
+    });
 
-      await expect(client.capture("purchase")).resolves.toBeNull();
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    it("snapshots consented calls before earlier identification responses arrive", async () => {
+      const fetchSpy = mockService();
+      let finish: ((value: Response) => void) | undefined;
+      fetchSpy.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const client = new Specify({ advertiserKey: "key" });
+      const originalUrl = window.location.href;
+      try {
+        client.setCookieConsent(true);
+        window.history.replaceState(null, "", "/first?spclk=one#first");
+        const firstUrl = window.location.href;
+        const firstIdentification = client.identify("A");
+        const firstCapture = client.capture("first");
+
+        window.history.replaceState(null, "", "/second?spclk=two#second");
+        const secondUrl = window.location.href;
+        const secondIdentification = client.identify("B");
+        const secondCapture = client.capture("second");
+        expect(fetchSpy).toHaveBeenCalledOnce();
+        finish?.(new Response(null, { status: 200 }));
+        await expect(
+          Promise.all([
+            firstIdentification,
+            firstCapture,
+            secondIdentification,
+            secondCapture,
+          ])
+        ).resolves.toEqual([200, 200, 200, 200]);
+
+        const [firstIdentity, firstEvent, secondIdentity, secondEvent] =
+          bodies(fetchSpy);
+        expect(firstIdentity).toMatchObject({ spclk: "one", userId: "A" });
+        expect(firstEvent).toMatchObject({
+          event: { name: "first", url: firstUrl },
+          spclk: "one",
+          userId: "A",
+        });
+        expect(secondIdentity).toMatchObject({ spclk: "two", userId: "B" });
+        expect(secondEvent).toMatchObject({
+          event: { name: "second", url: secondUrl },
+          spclk: "two",
+          userId: "B",
+        });
+      } finally {
+        window.history.replaceState(null, "", originalUrl);
+      }
+    });
+
+    it("pauses remaining requests on withdrawal and resumes without replaying sent requests", async () => {
+      vi.useFakeTimers();
+      const fetchSpy = mockService();
+      let finish: ((value: Response) => void) | undefined;
+      fetchSpy.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const client = new Specify({ advertiserKey: "key" });
+      await client.capture("first");
+      await client.capture("second");
+      client.setCookieConsent(true);
+      client.setCookieConsent(false);
+      await client.capture("third");
+      finish?.(new Response(null, { status: 200 }));
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBe(0));
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      client.setCookieConsent(true);
+      await client.capture("last");
+      expect(bodies(fetchSpy).map((body) => body.event.name)).toEqual([
+        "first",
+        "second",
+        "third",
+        "last",
+      ]);
+    });
+
+    it("contains failures, advances the queue, and never automatically retries", async () => {
+      const fetchSpy = mockService();
+      fetchSpy.mockRejectedValueOnce(new Error("Offline"));
+      const client = new Specify({ advertiserKey: "key" });
+      client.setCookieConsent(true);
+      await expect(client.identify("A")).resolves.toBeNull();
       await expect(client.capture("purchase")).resolves.toBe(200);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
-    it("aborts at 60 seconds and clears timers after every outcome", async () => {
-      vi.useFakeTimers();
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockImplementationOnce(
-          (_url, request) =>
-            new Promise((_resolve, reject) => {
-              const signal = request?.signal;
-              if (!signal) {
-                throw new Error("Missing capture abort signal");
-              }
-              signal.addEventListener("abort", () => reject(signal.reason), {
-                once: true,
-              });
-            })
-        )
-        .mockResolvedValueOnce(new Response(null, { status: 200 }))
-        .mockRejectedValueOnce(new Error("Connection lost"));
-      const client = new Specify({
-        advertiserKey: "advertiser-test-key",
-        getConsent: () => true,
-      });
-      const capture = client.capture("purchase");
-      const signal = fetchSpy.mock.calls[0][1]?.signal;
+    it("contains failures while flushing captures deferred by consent", async () => {
+      const fetchSpy = mockService();
+      fetchSpy.mockRejectedValueOnce(new Error("Offline"));
+      const client = new Specify({ advertiserKey: "key" });
+      await client.capture("first");
+      await client.capture("second");
+      client.setCookieConsent(true);
+      await client.capture("third");
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
 
-      await vi.advanceTimersByTimeAsync(59_999);
-      expect(signal?.aborted).toBe(false);
-      expect(vi.getTimerCount()).toBe(1);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(signal?.aborted).toBe(true);
-      await expect(capture).resolves.toBeNull();
-      expect(vi.getTimerCount()).toBe(0);
+    it("rejects invalid identification without changing the selected identity", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      await client.identify("é".repeat(128));
+      for (const invalid of [
+        "",
+        "0xbroken",
+        [WALLET_A, "invalid"] as Address[],
+      ]) {
+        const result = client.identify(invalid);
+        expect(result).toBeInstanceOf(Promise);
+      }
+      client.setCookieConsent(true);
+      await client.capture("purchase");
+      expect(
+        bodies(fetchSpy).every((body) => body.userId === "é".repeat(128))
+      ).toBe(true);
+      expect(bodies(fetchSpy)[0].walletAddresses).toEqual([]);
+    });
+
+    it("passes nonempty user IDs unchanged to the service for validation", async () => {
+      const fetchSpy = mockService(400);
+      const client = new Specify({ advertiserKey: "key" });
+      const userIds = [" ", "x@y", "é".repeat(129)];
+      client.setCookieConsent(true);
+
+      await expect(
+        Promise.all(userIds.map((userId) => client.identify(userId)))
+      ).resolves.toEqual([400, 400, 400]);
+      expect(bodies(fetchSpy).map((body) => body.userId)).toEqual(userIds);
+      await expect(client.capture("purchase")).resolves.toBe(400);
+      expect(bodies(fetchSpy)[3].userId).toBe(userIds[2]);
+    });
+
+    it("keeps only the latest identification pending before consent", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      await client.identify("A");
+      await client.identify("B");
+      client.setCookieConsent(true);
+      await client.capture("purchase");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(bodies(fetchSpy).every((body) => body.userId === "B")).toBe(true);
+    });
+
+    it("keeps consent, identity and buffers separate between instances", async () => {
+      const fetchSpy = mockService();
+      const first = new Specify({ advertiserKey: "first" });
+      const second = new Specify({ advertiserKey: "second" });
+      await first.identify("A");
+      await first.capture("first");
+      await second.identify("B");
+      await second.capture("second");
+      first.setCookieConsent(true);
+      await first.capture("last");
+      expect(bodies(fetchSpy).every((body) => body.userId === "A")).toBe(true);
+      expect(
+        fetchSpy.mock.calls.every(
+          ([, request]) =>
+            new Headers(request?.headers).get("x-api-key") === "first"
+        )
+      ).toBe(true);
+    });
+
+    it("bounds remembered wallets at 50 and refreshes repeated registrations", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      const wallets = Array.from(
+        { length: 51 },
+        (_, i) => `0x${i.toString(16).padStart(40, "0")}` as Address
+      );
+      for (const wallet of wallets) {
+        client.identify(wallet);
+      }
+      client.identify(wallets[0]);
+      client.setCookieConsent(true);
+      await client.capture("purchase");
+      expect(bodies(fetchSpy)[0].walletAddresses).toEqual([
+        ...wallets.slice(2),
+        wallets[0],
+      ]);
+    });
+
+    it("ignores empty input and invalid events without buffering", async () => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: "key" });
+      await client.identify(undefined);
+      await client.identify([]);
+      await client.capture("");
+      await client.capture(1 as unknown as string);
+      client.setCookieConsent(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const invalid = new Specify({ advertiserKey: "" });
+      invalid.setCookieConsent(true);
+      await invalid.capture("purchase");
+      await invalid.identify("A");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("aborts pending requests at 60 seconds and cleans up timers", async () => {
+      vi.useFakeTimers();
+      const fetchSpy = mockService();
+      fetchSpy.mockImplementationOnce(
+        (_url, request) =>
+          new Promise((_resolve, reject) => {
+            request?.signal?.addEventListener("abort", () =>
+              reject(new Error("Timeout"))
+            );
+          })
+      );
+      const client = new Specify({ advertiserKey: "key" });
+      client.setCookieConsent(true);
+      const pending = client.identify("A");
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect(pending).resolves.toBeNull();
       await expect(client.capture("purchase")).resolves.toBe(200);
       expect(vi.getTimerCount()).toBe(0);
-      await expect(client.capture("purchase")).resolves.toBeNull();
-      expect(vi.getTimerCount()).toBe(0);
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
   }
 );
