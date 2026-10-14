@@ -311,9 +311,21 @@ try {
 import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
 import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
 import { useSpecifyAd, type UseSpecifyAdOptions } from "@specify-sh/publisher-sdk/react";
-import Advertiser, { type Address as AdvertiserAddress, type SpecifyInitConfig as AdvertiserInitConfig } from "@specify-sh/advertiser-sdk";
-const advertiserConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key", getConsent: () => false };
+import Advertiser, { type Address as AdvertiserAddress, type CaptureOptions, type SpecifyInitConfig as AdvertiserInitConfig } from "@specify-sh/advertiser-sdk";
+const advertiserServerConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key" };
+const advertiserServer = new Advertiser(advertiserServerConfig);
+const advertiserCaptureOptions: CaptureOptions = { url: "https://shop.example/purchase" };
+const advertiserEvent: Promise<number | null> = advertiserServer.capture("purchase", "customer", advertiserCaptureOptions);
+const advertiserIdentification: Promise<number | null> = advertiserServer.identify("customer");
+const omittedIdentity: Promise<number | null> = advertiserServer.capture("purchase");
+void advertiserEvent;
+void advertiserIdentification;
+void omittedIdentity;
+const advertiserConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key" };
 const advertiserClient = new Advertiser(advertiserConfig);
+advertiserClient.setCookieConsent(true);
+const identification: Promise<number | null> = advertiserClient.identify(null);
+void identification;
 const advertiserWallet: AdvertiserAddress = "0x1111111111111111111111111111111111111111";
 advertiserClient.identify(advertiserWallet);
 advertiserClient.identify([advertiserWallet]);
@@ -403,8 +415,20 @@ import * as server from "@specify-sh/publisher-sdk/server";
 import * as advertiser from "@specify-sh/advertiser-sdk";
 const sameKeys = (actual, expected) => JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(expected);
 if (!sameKeys(advertiser, ["default"])) process.exit(1);
-const advertiserClient = new advertiser.default({ advertiserKey: "advertiser-test-key", getConsent: () => false });
-advertiserClient.identify("0x1111111111111111111111111111111111111111");
+let serverRequest;
+let serverUrl;
+let advertiserRequests = 0;
+globalThis.fetch = async (url, request) => { advertiserRequests++; serverUrl = url; serverRequest = request; return new Response(null, { status: 204 }); };
+const serverClient = new advertiser.default({ advertiserKey: "advertiser-test-key" });
+if (await serverClient.capture("purchase", " Customer ") !== 204) process.exit(1);
+if (serverRequest.credentials !== "omit") process.exit(1);
+const serverBody = JSON.parse(serverRequest.body);
+if (!sameKeys(serverBody, ["event", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.event, ["name"]) || serverBody.event.name !== "purchase") process.exit(1);
+if (await serverClient.identify(" Customer ") !== 204) process.exit(1);
+if (serverUrl !== "https://spfsrv.com/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
+const identificationBody = JSON.parse(serverRequest.body);
+if (!sameKeys(identificationBody, ["identity", "source"]) || identificationBody.source !== "server" || identificationBody.identity !== " Customer ") process.exit(1);
+if (await serverClient.capture("missing_identity") !== null || advertiserRequests !== 2) process.exit(1);
 if (!sameKeys(core, ["ImageFormat", "MAX_WALLET_ADDRESSES", "ValidationError", "assertValidAddresses", "assertValidPublisherKey", "prepareWalletAddresses", "requestAd"])) process.exit(1);
 if (!sameKeys(browser, ["ImageFormat", "ValidationError", "default"])) process.exit(1);
 if (!sameKeys(server, ["ImageFormat", "ValidationError", "serve"])) process.exit(1);
@@ -419,8 +443,10 @@ if (browser.ValidationError !== core.ValidationError || server.ValidationError !
   writeFileSync(
     join(consumerDirectory, "advertiser-browser.ts"),
     `import Advertiser from "@specify-sh/advertiser-sdk";
-const advertiserClient = new Advertiser({ advertiserKey: "advertiser-test-key", getConsent: () => false });
-advertiserClient.identify("0x1111111111111111111111111111111111111111");`
+const advertiserClient = new Advertiser({ advertiserKey: "advertiser-test-key" });
+advertiserClient.identify("customer");
+advertiserClient.setCookieConsent(true);
+globalThis.advertiserCapture = advertiserClient.capture("purchase");`
   );
   execFileSync(
     "bun",
@@ -439,9 +465,16 @@ advertiserClient.identify("0x1111111111111111111111111111111111111111");`
       "-e",
       `import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
-const dom = new JSDOM("", { runScripts: "outside-only" });
+const dom = new JSDOM("", { runScripts: "outside-only", url: "https://shop.example/?spclk=secret" });
+let browserRequest;
+dom.window.fetch = async (_url, request) => { browserRequest = request; return { status: 204 }; };
 try {
   dom.window.eval(readFileSync(process.argv[1], "utf8"));
+  if (await dom.window.advertiserCapture !== 204) process.exit(1);
+  if (browserRequest.credentials !== "include") process.exit(1);
+  const body = JSON.parse(browserRequest.body);
+  if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.event.url).searchParams.get("spclk") !== "secret") process.exit(1);
+  if (!dom.window.location.search.includes("spclk")) process.exit(1);
 } finally {
   dom.window.close();
 }`,
