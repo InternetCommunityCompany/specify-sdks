@@ -5,17 +5,17 @@ Client libraries for [Specify](https://specify.sh), the ad network for onchain a
 | Package | |
 | --- | --- |
 | [`@specify-sh/publisher-sdk`](https://www.npmjs.com/package/@specify-sh/publisher-sdk) | Serve ads in a browser, on a server, or from a React component |
-| [`@specify-sh/advertiser-sdk`](packages/advertiser-sdk) | Identify users and capture browser or server events (not published yet) |
-| [`@specify-sh/wizard`](https://www.npmjs.com/package/@specify-sh/wizard) | `npx @specify-sh/wizard` adds the publisher SDK with your own coding agent |
+| [`@specify-sh/advertiser-sdk`](packages/advertiser-sdk) | Identify users and capture browser or server events |
+| [`@specify-sh/wizard`](https://www.npmjs.com/package/@specify-sh/wizard) | `npx @specify-sh/wizard` adds the publisher SDK; use `--advertiser` for the advertiser SDK |
 | `@specify-sh/core` | Shared internals. Not meant to be installed directly |
 
 ## Documentation
 
-**[docs.specify.sh/publishing/get-started](https://docs.specify.sh/publishing/get-started)**
-
-- [Browser SDK reference](https://docs.specify.sh/publishing/sdk-browser)
-- [Node.js SDK reference](https://docs.specify.sh/publishing/sdk-server)
-- [Migrating from v0.4.x](https://docs.specify.sh/publishing/migrating-from-v0-4)
+- [Publisher SDK setup](https://docs.specify.sh/publishing/get-started)
+- [Publisher browser SDK reference](https://docs.specify.sh/publishing/sdk-browser)
+- [Publisher Node.js SDK reference](https://docs.specify.sh/publishing/sdk-server)
+- [Publisher SDK migration from v0.4.x](https://docs.specify.sh/publishing/migrating-from-v0-4)
+- [Advertiser SDK setup](https://docs.specify.sh/advertising/analytics-sdk-setup)
 
 ## Development
 

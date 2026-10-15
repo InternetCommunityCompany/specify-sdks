@@ -8,10 +8,10 @@ import type {
 import { type Docs, fetchDocs } from "./docs";
 import { createNarrator } from "./narration";
 import {
-  type ChosenPlacements,
-  PLAN_SCHEMA,
+  ADVERTISER_PLAN_SCHEMA,
+  type ChosenSuggestions,
   type Plan,
-  placementLabel,
+  PUBLISHER_PLAN_SCHEMA,
   readPlan,
 } from "./plan";
 import {
@@ -20,17 +20,11 @@ import {
   summarizeChanges,
   type TreeState,
 } from "./preflight";
-import {
-  feedbackPrompt,
-  implementPrompt,
-  PLACEHOLDER_PUBLISHER_KEY,
-  PUBLISHER_KEYS_URL,
-  reconPrompt,
-} from "./prompts";
+import { feedbackPrompt, implementPrompt, reconPrompt } from "./prompts";
+import { SDK_CONFIG, type SdkMode } from "./sdk";
 import type { Ui } from "./ui/host";
 import { WizardCancelled } from "./ui/store";
 
-const PUBLISHER_GUIDE = "https://docs.specify.sh/publishing/get-started";
 /** The whole run, laid out before it starts. */
 const STEPS = [
   "Choose a coding agent",
@@ -50,6 +44,7 @@ const STOPPED_MID_RUN =
 export interface WizardOptions {
   cwd: string;
   fetchImpl?: typeof fetch;
+  mode: SdkMode;
   seam: AgentSeam;
   signal?: AbortSignal;
   ui: Ui;
@@ -61,14 +56,15 @@ interface TurnContext {
   agent: DetectedAgent;
   conversation: AgentConversation;
   cwd: string;
+  mode: SdkMode;
   signal: AbortSignal | undefined;
   ui: Ui;
 }
 
-/** A plan the developer approved, with the placements they kept. */
+/** A plan the developer approved, with the suggestions they kept. */
 interface ApprovedPlan {
-  placements: ChosenPlacements;
   plan: Plan;
+  suggestions: ChosenSuggestions;
 }
 
 /** A stop the developer asked for. It ends the run at exit code 0. */
@@ -201,11 +197,14 @@ async function askForPlan(
   const reply = await runTurn(context, step, title, (onActivity) =>
     context.conversation.ask(prompt, {
       onActivity,
-      schema: PLAN_SCHEMA,
+      schema:
+        context.mode === "advertiser"
+          ? ADVERTISER_PLAN_SCHEMA
+          : PUBLISHER_PLAN_SCHEMA,
       signal: context.signal,
     })
   );
-  return readPlan(reply.json);
+  return readPlan(reply.json, context.mode);
 }
 
 /** A reply that is not a plan is worth one more ask before the run is lost. */
@@ -230,17 +229,23 @@ async function planTurn(
   }
   context.ui.fail(step, "no plan");
   throw new Error(
-    `${describeAgent(context.agent)} did not report a plan, twice. Run the wizard again, or set the SDK up by hand: ${PUBLISHER_GUIDE}`
+    `${describeAgent(context.agent)} did not report a plan, twice. Run the wizard again, or set the SDK up by hand: ${SDK_CONFIG[context.mode].guide}`
   );
 }
 
-async function choosePlacements(plan: Plan, ui: Ui): Promise<ChosenPlacements> {
-  const suggested = plan.placements.map(placementLabel);
+async function chooseSuggestions(
+  plan: Plan,
+  ui: Ui,
+  mode: SdkMode
+): Promise<ChosenSuggestions> {
+  const suggested = plan.suggestions;
   if (suggested.length === 0) {
     return { dropped: [], kept: [] };
   }
   const kept = await ui.multiselect(
-    "Which of these placements should the agent build?",
+    mode === "advertiser"
+      ? "Which of these events should the agent capture?"
+      : "Which of these placements should the agent build?",
     suggested.map((label) => ({ label, value: label })),
     suggested
   );
@@ -260,7 +265,10 @@ async function approvePlan(
     throw new WizardStop("Aborted. Nothing was changed.");
   }
   if (decision === "approve") {
-    return { placements: await choosePlacements(plan, context.ui), plan };
+    return {
+      plan,
+      suggestions: await chooseSuggestions(plan, context.ui, context.mode),
+    };
   }
   const feedback = (
     await context.ui.text("What should the agent do differently?")
@@ -285,8 +293,9 @@ async function implement(
     context.conversation.work(
       implementPrompt({
         docs,
-        placements: approved.placements,
+        mode: context.mode,
         plan: approved.plan.details,
+        suggestions: approved.suggestions,
       }),
       { onActivity, signal: context.signal }
     )
@@ -323,23 +332,22 @@ async function reportChanges(
   ui.keep(`Changes\n${await summarizeChanges(cwd)}`);
 }
 
-async function reportKey(cwd: string, ui: Ui): Promise<void> {
-  const files = await envFilesWithPlaceholder(cwd);
+async function reportKey(cwd: string, ui: Ui, mode: SdkMode): Promise<void> {
+  const { keysUrl, placeholderKey } = SDK_CONFIG[mode];
+  const files = await envFilesWithPlaceholder(cwd, placeholderKey);
   const where =
     files.length > 0
-      ? `Replace ${PLACEHOLDER_PUBLISHER_KEY} in ${files.join(" and ")}`
-      : `Replace ${PLACEHOLDER_PUBLISHER_KEY} in the env file the agent wrote`;
-  ui.keep(
-    `\nAdd your publisher key\n${where} with a key from ${PUBLISHER_KEYS_URL}`
-  );
+      ? `Replace ${placeholderKey} in ${files.join(" and ")}`
+      : `Replace ${placeholderKey} in the env file the agent wrote`;
+  ui.keep(`\nAdd your ${mode} key\n${where} with a key from ${keysUrl}`);
 }
 
 async function wizard(options: WizardOptions): Promise<number> {
-  const { cwd, fetchImpl, seam, signal, ui } = options;
+  const { cwd, fetchImpl, mode, seam, signal, ui } = options;
   ui.plan([...STEPS], shorten(cwd));
   const agents = await seam.detect();
   if (agents.length === 0) {
-    const missing = `No supported coding agent was found. Install one, or add the SDK by hand with the manual guide: ${PUBLISHER_GUIDE}`;
+    const missing = `No supported coding agent was found. Install one, or add the SDK by hand with the manual guide: ${SDK_CONFIG[mode].guide}`;
     ui.fail(AGENT_STEP, "none installed");
     ui.error([missing]);
     ui.keep(missing);
@@ -358,23 +366,24 @@ async function wizard(options: WizardOptions): Promise<number> {
   ui.begin(READ_STEP);
   // Before the first turn, so a network failure costs nothing. A turn that
   // runs without the current API costs minutes and integrates the wrong thing.
-  const docs = await fetchDocs(fetchImpl);
+  const docs = await fetchDocs(mode, fetchImpl);
 
   const conversation = seam.open(agent, cwd);
-  const context: TurnContext = { agent, conversation, cwd, signal, ui };
+  const context: TurnContext = { agent, conversation, cwd, mode, signal, ui };
   try {
     const plan = await planTurn(
       context,
       READ_STEP,
-      reconPrompt(docs),
+      reconPrompt(docs, mode),
       "Reading the project"
     );
     ui.finish(READ_STEP, plan.summary || undefined);
 
     ui.begin(REVIEW_STEP);
     const approved = await approvePlan(context, plan);
-    const kept = approved.placements.kept.length;
-    ui.finish(REVIEW_STEP, kept === 1 ? "1 placement" : `${kept} placements`);
+    const kept = approved.suggestions.kept.length;
+    const kind = mode === "advertiser" ? "event" : "placement";
+    ui.finish(REVIEW_STEP, `${kept} ${kind}${kept === 1 ? "" : "s"}`);
 
     // The opening contract has been read and acted on by now.
     ui.clear();
@@ -386,7 +395,7 @@ async function wizard(options: WizardOptions): Promise<number> {
   }
 
   await reportChanges(cwd, tree, ui);
-  await reportKey(cwd, ui);
+  await reportKey(cwd, ui, mode);
   ui.keep("\nRead the changes, then run your app.");
   return 0;
 }

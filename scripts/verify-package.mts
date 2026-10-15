@@ -206,7 +206,13 @@ try {
   if (!wizardCli.startsWith("#!/usr/bin/env node")) {
     throw new Error("The packed wizard CLI must start with a Node shebang");
   }
-  for (const dependency of ["anyagent-js", "giggles", "ink", "react"]) {
+  for (const dependency of [
+    "anyagent-js",
+    "giggles",
+    "ink",
+    "ink-text-input",
+    "react",
+  ]) {
     if (!wizard.manifest.dependencies?.[dependency]) {
       throw new Error(`Wizard must declare ${dependency} in dependencies`);
     }
@@ -247,27 +253,37 @@ try {
       "The installed wizard must print usage through its bin shim"
     );
   }
-  try {
-    execFileSync(
-      join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
-      [],
-      {
-        cwd: wizardConsumerDirectory,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 3000,
+  if (!wizardHelp.includes("--advertiser  Add the advertiser SDK")) {
+    throw new Error("The installed wizard must advertise advertiser setup");
+  }
+  for (const args of [[], ["--publisher"], ["--advertiser"]]) {
+    const advertiserMode = args.includes("--advertiser");
+    const guide = advertiserMode
+      ? "https://docs.specify.sh/advertising/analytics-sdk-setup"
+      : "https://docs.specify.sh/publishing/get-started";
+    try {
+      execFileSync(
+        join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
+        args,
+        {
+          cwd: wizardConsumerDirectory,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 3000,
+        }
+      );
+      throw new Error("The installed wizard must reject closed stdin");
+    } catch (error) {
+      if (
+        !(error instanceof Error && "status" in error) ||
+        error.status !== 1 ||
+        !("stderr" in error) ||
+        typeof error.stderr !== "string" ||
+        !error.stderr.includes("needs a real terminal") ||
+        !error.stderr.includes(guide)
+      ) {
+        throw error;
       }
-    );
-    throw new Error("The installed wizard must reject closed stdin");
-  } catch (error) {
-    if (
-      !(error instanceof Error && "status" in error) ||
-      error.status !== 1 ||
-      !("stderr" in error) ||
-      typeof error.stderr !== "string" ||
-      !error.stderr.includes("needs a real terminal")
-    ) {
-      throw error;
     }
   }
   console.log("Verified the installed wizard runs through its bin shim");

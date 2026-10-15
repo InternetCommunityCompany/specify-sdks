@@ -1,6 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import { render } from "ink";
 import type { Plan } from "../plan";
+import type { SdkMode } from "../sdk";
 import { App } from "./app";
 import type { Choice } from "./store";
 import { WizardStore } from "./store";
@@ -42,6 +43,7 @@ export interface Ui {
 
 interface HostOptions {
   input: Readable;
+  mode: SdkMode;
   /** Called when the developer presses Ctrl-C, before the run unwinds. */
   onCancel?: () => void;
   output: Writable;
@@ -62,7 +64,7 @@ export function startUi(options: HostOptions): Ui {
   const store = new WizardStore(options.onCancel);
   const record: string[] = [];
 
-  const instance = render(<App store={store} />, {
+  const instance = render(<App mode={options.mode} store={store} />, {
     exitOnCtrlC: false,
     stdin: options.input as NodeJS.ReadStream,
     stdout: options.output as NodeJS.WriteStream,
