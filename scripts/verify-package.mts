@@ -439,9 +439,9 @@ const serverClient = new advertiser.default({ advertiserKey: "advertiser-test-ke
 if (await serverClient.capture("purchase", " Customer ") !== 204) process.exit(1);
 if (serverRequest.credentials !== "omit") process.exit(1);
 const serverBody = JSON.parse(serverRequest.body);
-if (!sameKeys(serverBody, ["event", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.event, ["name"]) || serverBody.event.name !== "purchase") process.exit(1);
+if (!sameKeys(serverBody, ["events", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.events[0], ["name"]) || serverBody.events[0].name !== "purchase") process.exit(1);
 if (await serverClient.identify(" Customer ") !== 204) process.exit(1);
-if (serverUrl !== "https://spfsrv.com/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
+if (serverUrl !== "http://localhost:3000/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
 const identificationBody = JSON.parse(serverRequest.body);
 if (!sameKeys(identificationBody, ["identity", "source"]) || identificationBody.source !== "server" || identificationBody.identity !== " Customer ") process.exit(1);
 if (await serverClient.capture("missing_identity") !== null || advertiserRequests !== 2) process.exit(1);
@@ -483,13 +483,14 @@ globalThis.advertiserCapture = advertiserClient.capture("purchase");`
 import { JSDOM } from "jsdom";
 const dom = new JSDOM("", { runScripts: "outside-only", url: "https://shop.example/?spclk=secret" });
 let browserRequest;
+dom.window.TextEncoder = TextEncoder;
 dom.window.fetch = async (_url, request) => { browserRequest = request; return { status: 204 }; };
 try {
   dom.window.eval(readFileSync(process.argv[1], "utf8"));
   if (await dom.window.advertiserCapture !== 204) process.exit(1);
   if (browserRequest.credentials !== "include") process.exit(1);
   const body = JSON.parse(browserRequest.body);
-  if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.event.url).searchParams.get("spclk") !== "secret") process.exit(1);
+  if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.events[0].url).searchParams.get("spclk") !== "secret") process.exit(1);
   if (!dom.window.location.search.includes("spclk")) process.exit(1);
 } finally {
   dom.window.close();

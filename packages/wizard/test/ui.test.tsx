@@ -1,4 +1,5 @@
 import { render } from "ink-testing-library";
+import { act } from "react";
 import { describe, expect, it } from "vitest";
 import type { SdkMode } from "../src/sdk";
 import { App } from "../src/ui/app";
@@ -19,20 +20,13 @@ function mount(mode: SdkMode, onCancel?: () => void) {
   return { store, view };
 }
 
-/** Simulate typing separately from a paste, which arrives in one chunk. */
+/** Flush each key's React updates before sending the next key. */
 function type(
   view: { stdin: { write: (data: string) => void } },
   keys: string
 ): Promise<void> {
   return [...keys].reduce(
-    (typed, key) =>
-      typed.then(
-        () =>
-          new Promise<void>((resolve) => {
-            view.stdin.write(key);
-            setTimeout(resolve, 5);
-          })
-      ),
+    (typed, key) => typed.then(() => act(() => view.stdin.write(key))),
     Promise.resolve()
   );
 }

@@ -4,7 +4,9 @@ import {
   MAX_WALLET_ADDRESSES,
 } from "@specify-sh/core";
 
-import { requestAdvertiser } from "./request";
+import { MAX_BODY_BYTES, requestAdvertiser } from "./request";
+
+const MAX_BATCH_EVENTS = 50;
 
 export type Address = CoreAddress;
 
@@ -18,10 +20,16 @@ export interface CaptureOptions {
   url?: string;
 }
 
-interface PendingRequest {
-  body: object;
-  operation: "events" | "identify";
-  resolve?: (status: number | null) => void;
+interface PendingBatch {
+  body: {
+    cookieConsent: boolean;
+    events: { name: string; url: string }[];
+    source: "browser";
+    spclk?: string;
+    userId?: string;
+    walletAddresses: Address[];
+  };
+  contextKey: string;
 }
 
 export default class Specify {
@@ -29,9 +37,9 @@ export default class Specify {
   private cookieConsent: boolean;
   private userId: string | undefined;
   private readonly identifiedAddresses = new Set<Address>();
-  private pendingRequests: PendingRequest[] = [];
+  private readonly pendingBatches: PendingBatch[] = [];
   private pendingIdentification: boolean;
-  private sending: Promise<void> | null = null;
+  private sending: Promise<number | null> | null = null;
 
   /**
    * Browser consent starts false; call setCookieConsent on page load.
@@ -73,11 +81,15 @@ export default class Specify {
       }
 
       if (this.pendingIdentification) {
-        this.pendingRequests.unshift({
-          body: this.identityBody(),
-          operation: "identify",
-        });
+        const body = this.identityBody();
         this.pendingIdentification = false;
+        requestAdvertiser(
+          this.advertiserKey,
+          body,
+          "include",
+          "identify",
+          true
+        );
       }
 
       this.sendPendingRequests();
@@ -121,15 +133,6 @@ export default class Specify {
         this.identifiedAddresses.clear();
         this.pendingIdentification = false;
 
-        this.pendingRequests = this.pendingRequests.filter((request) => {
-          if (request.operation === "events") {
-            return true;
-          }
-
-          request.resolve?.(null);
-          return false;
-        });
-
         return null;
       }
 
@@ -160,7 +163,13 @@ export default class Specify {
         return null;
       }
 
-      return await this.enqueue("identify", this.identityBody());
+      return await requestAdvertiser(
+        this.advertiserKey,
+        this.identityBody(),
+        "include",
+        "identify",
+        true
+      );
     } catch {
       return null;
     }
@@ -169,6 +178,7 @@ export default class Specify {
   /**
    * Later identity or URL changes never alter a captured event.
    * Before consent, the snapshot stays in memory and is sent after consent.
+   * With consent, captures send directly without waiting for buffered events or identify.
    * Servers require identity on every call and send immediately without cookies.
    * @param name - The nonempty product event name.
    * @param identity - A user ID or wallet for this event; required on a server.
@@ -207,7 +217,7 @@ export default class Specify {
         return await requestAdvertiser(
           this.advertiserKey,
           {
-            event: { name, ...(url === undefined ? {} : { url }) },
+            events: [{ name, ...(url === undefined ? {} : { url }) }],
             identity,
             source: "server",
           },
@@ -218,15 +228,21 @@ export default class Specify {
 
       const body = {
         ...this.identityBody(identity),
-        event: { name, url: window.location.href },
+        events: [{ name, url: window.location.href }],
       };
 
       if (!this.cookieConsent) {
-        this.pendingRequests.push({ body, operation: "events" });
+        this.enqueue(body);
         return null;
       }
 
-      return await this.enqueue("events", body);
+      return await requestAdvertiser(
+        this.advertiserKey,
+        body,
+        "include",
+        "events",
+        true
+      );
     } catch {
       return null;
     }
@@ -261,49 +277,51 @@ export default class Specify {
     };
   }
 
-  private enqueue(
-    operation: PendingRequest["operation"],
-    body: object
-  ): Promise<number | null> {
-    return new Promise((resolve) => {
-      this.pendingRequests.push({ body, operation, resolve });
-      this.sendPendingRequests();
-    });
+  private enqueue(body: PendingBatch["body"]): void {
+    const { events, ...context } = body;
+    const contextKey = JSON.stringify(context);
+    const lastBatchIndex = this.pendingBatches.length - 1;
+    const batch = this.pendingBatches[lastBatchIndex];
+
+    const combinedBody = batch && {
+      ...body,
+      events: [...batch.body.events, ...events],
+    };
+
+    if (
+      batch?.contextKey === contextKey &&
+      combinedBody &&
+      combinedBody.events.length <= MAX_BATCH_EVENTS &&
+      new TextEncoder().encode(JSON.stringify(combinedBody)).byteLength <=
+        MAX_BODY_BYTES
+    ) {
+      batch.body = combinedBody;
+    } else {
+      this.pendingBatches.push({ body, contextKey });
+    }
   }
 
   private sendPendingRequests(): void {
-    if (
-      this.sending !== null ||
-      !this.cookieConsent ||
-      this.pendingRequests.length === 0
-    ) {
+    if (this.sending || !this.cookieConsent) {
       return;
     }
 
-    this.sending = this.sendNextRequest().finally(() => {
+    // shift() removes and returns the oldest batch. Taking it out now keeps
+    // new captures from joining a batch whose request is already in flight.
+    const batch = this.pendingBatches.shift();
+    if (!batch) {
+      return;
+    }
+
+    this.sending = requestAdvertiser(
+      this.advertiserKey,
+      batch.body,
+      "include",
+      "events",
+      true
+    ).finally(() => {
       this.sending = null;
       this.sendPendingRequests();
     });
-  }
-
-  private async sendNextRequest(): Promise<void> {
-    if (!this.cookieConsent) {
-      return;
-    }
-
-    const next = this.pendingRequests.shift();
-
-    if (next === undefined) {
-      return;
-    }
-
-    const status = await requestAdvertiser(
-      this.advertiserKey,
-      next.body,
-      "include",
-      next.operation,
-      true
-    );
-    next.resolve?.(status);
   }
 }

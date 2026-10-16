@@ -62,7 +62,7 @@ describe("advertiser server requests in Node and DOM", () => {
     });
     expect(requests[3]).toEqual({
       body: {
-        event: { name: "server_event" },
+        events: [{ name: "server_event" }],
         identity: "explicit_customer",
         source: "server",
       },
@@ -71,7 +71,7 @@ describe("advertiser server requests in Node and DOM", () => {
     expect(requests[4]).toEqual({
       body: {
         cookieConsent: true,
-        event: { name: "browser_again", url: page.location.href },
+        events: [{ name: "browser_again", url: page.location.href }],
         source: "browser",
         spclk: "landing",
         userId: "browser_customer",
@@ -110,25 +110,25 @@ describe("advertiser server requests in Node and DOM", () => {
         credentials: "omit",
         headers: { "Content-Type": "application/json", "x-api-key": "key" },
         method: "POST",
-        url: "https://spfsrv.com/v1/identify",
+        url: "http://localhost:3000/v1/identify",
       },
       {
         body: {
-          event: { name: "purchase" },
+          events: [{ name: "purchase" }],
           identity: "Customer_B",
           source: "server",
         },
         credentials: "omit",
         headers: { "Content-Type": "application/json", "x-api-key": "key" },
         method: "POST",
-        url: "https://spfsrv.com/v1/events",
+        url: "http://localhost:3000/v1/events",
       },
       {
         body: { identity: wallet, source: "server" },
         credentials: "omit",
         headers: { "Content-Type": "application/json", "x-api-key": "key" },
         method: "POST",
-        url: "https://spfsrv.com/v1/identify",
+        url: "http://localhost:3000/v1/identify",
       },
     ]);
   });
@@ -231,26 +231,28 @@ describe("advertiser server requests in Node and DOM", () => {
       )
     ).toEqual([
       {
-        event: { name: "purchase" },
+        events: [{ name: "purchase" }],
         identity: " Customer_A ",
         source: "server",
       },
       {
-        event: {
-          name: "signup",
-          url: "https://shop.example/signup?spclk=secret&keep=1&spclk=two",
-        },
+        events: [
+          {
+            name: "signup",
+            url: "https://shop.example/signup?spclk=secret&keep=1&spclk=two",
+          },
+        ],
         identity: "Customer_B",
         source: "server",
       },
       {
-        event: { name: "purchase" },
+        events: [{ name: "purchase" }],
         identity: "0x1111111111111111111111111111111111111111",
         source: "server",
       },
     ]);
     for (const [url, request] of fetchSpy.mock.calls) {
-      expect(url).toBe("https://spfsrv.com/v1/events");
+      expect(url).toBe("http://localhost:3000/v1/events");
       expect(request?.credentials).toBe("omit");
       expect(request?.headers).toEqual({
         "Content-Type": "application/json",
