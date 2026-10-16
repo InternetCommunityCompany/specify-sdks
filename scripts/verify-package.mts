@@ -206,7 +206,13 @@ try {
   if (!wizardCli.startsWith("#!/usr/bin/env node")) {
     throw new Error("The packed wizard CLI must start with a Node shebang");
   }
-  for (const dependency of ["anyagent-js", "giggles", "ink", "react"]) {
+  for (const dependency of [
+    "anyagent-js",
+    "giggles",
+    "ink",
+    "ink-text-input",
+    "react",
+  ]) {
     if (!wizard.manifest.dependencies?.[dependency]) {
       throw new Error(`Wizard must declare ${dependency} in dependencies`);
     }
@@ -247,27 +253,37 @@ try {
       "The installed wizard must print usage through its bin shim"
     );
   }
-  try {
-    execFileSync(
-      join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
-      [],
-      {
-        cwd: wizardConsumerDirectory,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 3000,
+  if (!wizardHelp.includes("--advertiser  Add the advertiser SDK")) {
+    throw new Error("The installed wizard must advertise advertiser setup");
+  }
+  for (const args of [[], ["--publisher"], ["--advertiser"]]) {
+    const advertiserMode = args.includes("--advertiser");
+    const guide = advertiserMode
+      ? "https://docs.specify.sh/advertising/analytics-sdk-setup"
+      : "https://docs.specify.sh/publishing/get-started";
+    try {
+      execFileSync(
+        join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
+        args,
+        {
+          cwd: wizardConsumerDirectory,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 3000,
+        }
+      );
+      throw new Error("The installed wizard must reject closed stdin");
+    } catch (error) {
+      if (
+        !(error instanceof Error && "status" in error) ||
+        error.status !== 1 ||
+        !("stderr" in error) ||
+        typeof error.stderr !== "string" ||
+        !error.stderr.includes("needs a real terminal") ||
+        !error.stderr.includes(guide)
+      ) {
+        throw error;
       }
-    );
-    throw new Error("The installed wizard must reject closed stdin");
-  } catch (error) {
-    if (
-      !(error instanceof Error && "status" in error) ||
-      error.status !== 1 ||
-      !("stderr" in error) ||
-      typeof error.stderr !== "string" ||
-      !error.stderr.includes("needs a real terminal")
-    ) {
-      throw error;
     }
   }
   console.log("Verified the installed wizard runs through its bin shim");
@@ -423,9 +439,9 @@ const serverClient = new advertiser.default({ advertiserKey: "advertiser-test-ke
 if (await serverClient.capture("purchase", " Customer ") !== 204) process.exit(1);
 if (serverRequest.credentials !== "omit") process.exit(1);
 const serverBody = JSON.parse(serverRequest.body);
-if (!sameKeys(serverBody, ["event", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.event, ["name"]) || serverBody.event.name !== "purchase") process.exit(1);
+if (!sameKeys(serverBody, ["events", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.events[0], ["name"]) || serverBody.events[0].name !== "purchase") process.exit(1);
 if (await serverClient.identify(" Customer ") !== 204) process.exit(1);
-if (serverUrl !== "https://spfsrv.com/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
+if (serverUrl !== "http://localhost:3000/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
 const identificationBody = JSON.parse(serverRequest.body);
 if (!sameKeys(identificationBody, ["identity", "source"]) || identificationBody.source !== "server" || identificationBody.identity !== " Customer ") process.exit(1);
 if (await serverClient.capture("missing_identity") !== null || advertiserRequests !== 2) process.exit(1);
@@ -467,13 +483,14 @@ globalThis.advertiserCapture = advertiserClient.capture("purchase");`
 import { JSDOM } from "jsdom";
 const dom = new JSDOM("", { runScripts: "outside-only", url: "https://shop.example/?spclk=secret" });
 let browserRequest;
+dom.window.TextEncoder = TextEncoder;
 dom.window.fetch = async (_url, request) => { browserRequest = request; return { status: 204 }; };
 try {
   dom.window.eval(readFileSync(process.argv[1], "utf8"));
   if (await dom.window.advertiserCapture !== 204) process.exit(1);
   if (browserRequest.credentials !== "include") process.exit(1);
   const body = JSON.parse(browserRequest.body);
-  if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.event.url).searchParams.get("spclk") !== "secret") process.exit(1);
+  if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.events[0].url).searchParams.get("spclk") !== "secret") process.exit(1);
   if (!dom.window.location.search.includes("spclk")) process.exit(1);
 } finally {
   dom.window.close();

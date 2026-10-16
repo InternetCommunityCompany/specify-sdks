@@ -29,12 +29,12 @@ const status = await specify.capture('purchase');
 
 Consent starts false. Call this setter on page load and whenever your consent
 manager reports a change. Only exactly `true` allows browser requests.
-The constructor no longer accepts `getConsent`.
 
 Before consent, `identify()` remembers the latest identity and `capture()` buffers
 events in instance memory. Granting consent sends that pending identification
-first, then buffered events in capture order. The setter returns void and starts
-sending asynchronously. Repeating a grant does not replay attempted requests.
+and starts flushing buffered events in capture order, without waiting for
+identification to finish. The setter returns void. Repeating a grant does not
+replay attempted requests.
 
 Withdrawing consent pauses unsent requests. Requests already sent may complete;
 a later grant resumes the queue. The backend also requires consent before
@@ -54,10 +54,11 @@ in 256 UTF-8 bytes. A `0x` prefix requires a valid wallet. IDs are preserved exa
 including case and surrounding spaces. Arrays contain wallets only. Each client
 remembers up to 50 wallets; repeated identification refreshes a wallet's position.
 
-`identify(null)` clears the selected user ID and remembered wallets and cancels
-unsent identification requests. It preserves captured event snapshots and does
-not delete Specify's HttpOnly cookie or server mappings. In-flight requests may
-still complete. `identify(undefined)` and an empty wallet array do nothing.
+`identify(null)` clears the selected user ID, remembered wallets, and any
+identification deferred until consent. Deferred calls have already returned
+`null`. It preserves captured event snapshots and does not delete Specify's
+HttpOnly cookie or server mappings. Requests already sent may still complete.
+`identify(undefined)` and an empty wallet array do nothing.
 
 ### `capture(name, identity?, options?)`
 
@@ -65,8 +66,14 @@ Snapshots a nonempty event name, the complete page URL, selected user ID when
 present, remembered wallets, and the first `spclk` query parameter when present.
 Later identity or URL changes do not alter that event. Before consent, capture
 returns null immediately and keeps the snapshot in memory until consent is
-granted. After consent, captures and identifications share a sequential queue so
-cookies returned by one request are available to the next.
+granted. Consecutive buffered events with the same user ID, wallets, and landing
+token are sent together, up to 50 events and 16 KiB of JSON per request. Each event
+keeps its captured URL.
+With consent, new captures send directly, even while the buffer is flushing.
+They may reach the service before older buffered events or finish out of order.
+Identification sends independently and never blocks captures: `/v1/events`
+resolves the identity in each event's snapshot itself. Sending starts immediately;
+there is no timer that waits for more events.
 
 An explicit identity applies only to that event and replaces the remembered user
 ID and wallets in its snapshot. It does not change the identity used by later
@@ -80,8 +87,8 @@ or refresh the sealed HttpOnly identity cookie.
 
 The full event URL is recorded, including repeated query parameters and fragments.
 The SDK reads `spclk` from the page without removing it or storing it separately.
-The service checks token age when the request arrives; buffering does not extend
-the one-hour token window. Event timestamps reflect service receipt time.
+The service validates the landing token but does not enforce an age limit.
+Event timestamps reflect service receipt time.
 
 The buffer belongs to the instance, has no configured size limit, and is lost on
 reload or when the instance is discarded. It is never persisted to browser
@@ -120,11 +127,22 @@ accepted, `400` invalid request or missing identity, `401` invalid key, `403`
 missing browser consent, `429` rate limit exceeded, or `503` service unavailable.
 Other received statuses, including `204`, also pass through.
 
+Buffered captures have already returned null; flushing does not change that
+result. Consented captures return their own request's HTTP status. The service
+validates each whole batch before insertion and counts every event against the
+rate limit. One invalid event rejects the batch. Server captures send immediately
+as one-event requests and do not share a background queue.
+
 Null means local rejection, a no-op, deferred identification, a buffered capture,
-cancelled unsent identification, or no response. Missing keys, invalid input,
+or no response. Missing keys, invalid input,
 server calls without identity, network failures, and timeouts are contained without throwing
 into the host or logging automatically. Requests time out after 60 seconds when
 AbortController is available.
+An individual request exceeding 16 KiB of JSON returns null without transport.
+
+The events endpoint accepts an `events` array with shared identity fields. Deploy
+the matching Edge endpoint before using this SDK version; the previous singular
+`event` request format is no longer sent.
 
 Requests are attempted once, with no automatic retries or durable offline queue.
 A lost response does not establish whether storage succeeded. Development keys

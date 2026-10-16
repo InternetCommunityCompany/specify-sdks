@@ -8,12 +8,13 @@ import {
   Select,
   Spinner,
   spinners,
-  TextInput,
   Viewport,
   type ViewportRef,
 } from "giggles/ui";
 import { Box, Text, useInput, useStdin, useStdout } from "ink";
+import TextInput from "ink-text-input";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { SdkMode } from "../sdk";
 import type {
   Ask,
   Entry,
@@ -48,10 +49,18 @@ function clamp(text: string, width: number): string {
     : text;
 }
 
-function Header({ subtitle, width }: { subtitle?: string; width: number }) {
+function Header({
+  mode,
+  subtitle,
+  width,
+}: {
+  mode: SdkMode;
+  subtitle?: string;
+  width: number;
+}) {
   return (
     <Box justifyContent="space-between" marginBottom={1} width={width}>
-      <Text bold>Specify publisher SDK</Text>
+      <Text bold>Specify {mode} SDK</Text>
       {subtitle ? <Text dimColor>{subtitle}</Text> : null}
     </Box>
   );
@@ -240,7 +249,15 @@ function Review({
   );
 }
 
-function Prompt({ ask, answer }: { ask: Ask; answer: (reply: Reply) => void }) {
+function Prompt({
+  ask,
+  answer,
+  mode,
+}: {
+  ask: Ask;
+  answer: (reply: Reply) => void;
+  mode: SdkMode;
+}) {
   const [draft, setDraft] = useState("");
   // The selection is held here: handing MultiSelect a bare `value` prop makes
   // it controlled by something that never changes, and Space would toggle
@@ -255,13 +272,15 @@ function Prompt({ ask, answer }: { ask: Ask; answer: (reply: Reply) => void }) {
   }
   if (ask.kind === "text") {
     return (
-      <TextInput
-        label={ask.message}
-        onChange={setDraft}
-        onSubmit={answer}
-        placeholder={ask.placeholder}
-        value={draft}
-      />
+      <Box flexDirection="column">
+        <Text bold>{ask.message}</Text>
+        <TextInput
+          onChange={setDraft}
+          onSubmit={answer}
+          placeholder={ask.placeholder}
+          value={draft}
+        />
+      </Box>
     );
   }
   if (ask.kind === "multiselect") {
@@ -275,7 +294,11 @@ function Prompt({ ask, answer }: { ask: Ask; answer: (reply: Reply) => void }) {
           value={chosen}
         />
         <Box marginTop={1}>
-          <Text dimColor>Space toggles a placement, Enter confirms.</Text>
+          <Text dimColor>
+            {mode === "advertiser"
+              ? "Space toggles an event, Enter confirms."
+              : "Space toggles a placement, Enter confirms."}
+          </Text>
         </Box>
       </Box>
     );
@@ -320,7 +343,7 @@ function fitting(entries: Entry[], budget: number): Entry[] {
   return shown;
 }
 
-function Screen({ store }: { store: WizardStore }) {
+function Screen({ mode, store }: { mode: SdkMode; store: WizardStore }) {
   const state = useSyncExternalStore(store.subscribe, store.getState);
   const size = useTerminalSize();
   const rows = size.rows || DEFAULT_ROWS;
@@ -331,7 +354,7 @@ function Screen({ store }: { store: WizardStore }) {
   if (state.ask?.kind === "review") {
     return (
       <Box flexDirection="column" height={rows} paddingX={1}>
-        <Header subtitle={state.where} width={width} />
+        <Header mode={mode} subtitle={state.where} width={width} />
         <Review
           answer={store.answer}
           ask={state.ask}
@@ -349,7 +372,7 @@ function Screen({ store }: { store: WizardStore }) {
 
   return (
     <Box flexDirection="column" height={rows} paddingX={1}>
-      <Header subtitle={state.where} width={width} />
+      <Header mode={mode} subtitle={state.where} width={width} />
       <Checklist steps={state.steps} width={width} />
       {entries.map((entry, index) => (
         <Callout entry={entry} key={`${index}-${entry.kind}`} width={width} />
@@ -357,7 +380,7 @@ function Screen({ store }: { store: WizardStore }) {
       {state.task ? <Running task={state.task} width={width} /> : null}
       {state.ask ? (
         <Box marginTop={1}>
-          <Prompt answer={store.answer} ask={state.ask} />
+          <Prompt answer={store.answer} ask={state.ask} mode={mode} />
         </Box>
       ) : null}
     </Box>
@@ -383,11 +406,11 @@ function Cancelling({ store }: { store: WizardStore }) {
  * @param props The store the tree reads and answers through.
  * @returns The Ink tree.
  */
-export function App({ store }: { store: WizardStore }) {
+export function App({ mode, store }: { mode: SdkMode; store: WizardStore }) {
   return (
     <GigglesProvider fullScreen>
       <Cancelling store={store} />
-      <Screen store={store} />
+      <Screen mode={mode} store={store} />
     </GigglesProvider>
   );
 }

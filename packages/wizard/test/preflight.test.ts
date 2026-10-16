@@ -103,22 +103,26 @@ describe("envFilesWithPlaceholder", () => {
     writeFileSync(join(cwd, ".env.production"), "KEY=spk_live_real\n");
     writeFileSync(join(cwd, "config.ts"), "spk_your_key_here\n");
 
-    await expect(envFilesWithPlaceholder(cwd)).resolves.toEqual([
-      ".env",
-      ".env.local",
-    ]);
+    await expect(
+      envFilesWithPlaceholder(cwd, "spk_your_key_here")
+    ).resolves.toEqual([".env", ".env.local"]);
   });
 
   it("finds nothing when no env file holds the placeholder", async () => {
     const cwd = temporaryDirectory();
     writeFileSync(join(cwd, ".env"), "KEY=spk_live_real\n");
 
-    await expect(envFilesWithPlaceholder(cwd)).resolves.toEqual([]);
+    await expect(
+      envFilesWithPlaceholder(cwd, "spk_your_key_here")
+    ).resolves.toEqual([]);
   });
 
   it("reports nothing rather than throwing when the directory is gone", async () => {
     await expect(
-      envFilesWithPlaceholder(join(tmpdir(), "specify-wizard-missing"))
+      envFilesWithPlaceholder(
+        join(tmpdir(), "specify-wizard-missing"),
+        "spk_your_key_here"
+      )
     ).resolves.toEqual([]);
   });
 });
