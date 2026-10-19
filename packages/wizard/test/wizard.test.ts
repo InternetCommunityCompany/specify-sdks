@@ -987,6 +987,53 @@ describe("the agent session", () => {
   });
 });
 
+describe("a run from a package inside a monorepo", () => {
+  it("checks and summarizes the whole repository, but looks for env files only in the package", async () => {
+    const root = repository();
+    const web = join(root, "apps", "web");
+    const api = join(root, "services", "api");
+    mkdirSync(web, { recursive: true });
+    mkdirSync(api, { recursive: true });
+    writeFileSync(join(root, ".gitignore"), ".env*\n");
+    writeFileSync(join(web, "package.json"), '{"name":"web"}\n');
+    writeFileSync(join(api, "index.ts"), "export {};\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "Add the workspaces"]);
+    writeFileSync(join(api, "index.ts"), "export const port = 3000;\n");
+    const seam = fakeSeam({
+      onWork: () => {
+        mkdirSync(join(web, "lib"));
+        writeFileSync(join(web, "lib", "specify.ts"), "// client\n");
+        writeFileSync(join(web, ".env.local"), "KEY=spk_your_key_here\n");
+        writeFileSync(join(root, ".env"), "KEY=spk_your_key_here\n");
+      },
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+    });
+    const ui = fakeUi({ confirm: [true], review: ["approve"] });
+
+    await expect(
+      runWizard({
+        cwd: web,
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(ui.shown).toContain(
+      "This working tree has 1 changed file. The agent is about to edit files, and its changes will mix with yours."
+    );
+    expect(ui.finished).toContain("Check the working tree: 1 changed");
+    const [changes, key] = ui.record;
+    expect(changes).toContain("services/api/index.ts");
+    expect(changes).toContain(
+      "New files, not yet tracked by Git:\napps/web/lib/specify.ts"
+    );
+    expect(key).toContain("Replace spk_your_key_here in .env.local with");
+  });
+});
+
 describe("advertiser wizard", () => {
   const purchase = {
     file: "src/checkout.ts",
