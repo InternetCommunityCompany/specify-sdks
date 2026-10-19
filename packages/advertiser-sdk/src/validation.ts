@@ -6,14 +6,24 @@ const TRAILING_SLASHES = /\/+$/;
 
 export const ADVERTISER_KEY_PATTERN = /^sak_[0-9a-f]{30}$/;
 
+// URL.canParse arrived in Safari 17 and Chrome 120, after the browsers this
+// SDK supports.
+export function parseUrl(value: unknown): URL | undefined {
+  try {
+    return typeof value === "string" ? new URL(value) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function apiBase(value: unknown): string | undefined {
   if (value === undefined) {
     return "https://spfsrv.com";
   }
-  if (typeof value !== "string" || !URL.canParse(value)) {
+  const url = parseUrl(value);
+  if (url === undefined) {
     return;
   }
-  const url = new URL(value);
   const secure =
     url.protocol === "https:" ||
     (url.protocol === "http:" && LOCAL_HOSTNAMES.has(url.hostname));

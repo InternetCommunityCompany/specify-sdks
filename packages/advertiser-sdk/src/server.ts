@@ -9,6 +9,7 @@ import {
   apiBase,
   isUserId,
   isWallet,
+  parseUrl,
 } from "./validation.js";
 
 const MAX_DEDUPE_KEY_LENGTH = 256;
@@ -33,13 +34,14 @@ export interface CaptureOptions {
   url?: string;
 }
 
-function validate(options: CaptureOptions): void {
+function validate(options: CaptureOptions): {
+  advertiserKey: string;
+  apiUrl: string;
+} {
   const { advertiserKey, apiUrl, dedupeKey, event, identity, url } =
     (options as Partial<CaptureOptions> | undefined) ?? {};
-  if (
-    typeof advertiserKey !== "string" ||
-    !ADVERTISER_KEY_PATTERN.test(advertiserKey)
-  ) {
+  const key = typeof advertiserKey === "string" ? advertiserKey.trim() : "";
+  if (!ADVERTISER_KEY_PATTERN.test(key)) {
     throw new ValidationError(
       "Invalid advertiser key. Copy it from your Specify dashboard; it starts with sak_."
     );
@@ -72,16 +74,18 @@ function validate(options: CaptureOptions): void {
       "dedupeKey must be a non-empty string of at most 256 characters, such as your order ID."
     );
   }
-  if (url !== undefined && !(typeof url === "string" && URL.canParse(url))) {
+  if (url !== undefined && parseUrl(url) === undefined) {
     throw new ValidationError(
       "url must be an absolute URL, such as https://shop.example/checkout."
     );
   }
-  if (apiBase(apiUrl) === undefined) {
+  const base = apiBase(apiUrl);
+  if (base === undefined) {
     throw new ValidationError(
       "apiUrl must be an https URL without a query string. Leave it unset unless Specify gave you one."
     );
   }
+  return { advertiserKey: key, apiUrl: base };
 }
 
 /**
@@ -95,8 +99,8 @@ function validate(options: CaptureOptions): void {
  * @throws {ValidationError} When an option is invalid
  */
 export async function capture(options: CaptureOptions): Promise<void> {
-  validate(options);
-  const { advertiserKey, apiUrl, dedupeKey, event, identity, url } = options;
+  const { advertiserKey, apiUrl } = validate(options);
+  const { dedupeKey, event, identity, url } = options;
   const body = {
     events: [
       {
@@ -113,8 +117,5 @@ export async function capture(options: CaptureOptions): Promise<void> {
       "This event is larger than 16 KiB. Shorten its name or url."
     );
   }
-  await send(
-    { advertiserKey, apiUrl: apiBase(apiUrl) as string, operation: "events" },
-    () => ({ body })
-  );
+  await send({ advertiserKey, apiUrl, operation: "events" }, () => ({ body }));
 }

@@ -49,9 +49,7 @@ function pageUrl(): string | undefined {
 
 function clickTokenIn(url: string): string | undefined {
   const token = new URL(url).searchParams.get("spclk");
-  return token !== null && token.length <= MAX_CLICK_TOKEN_LENGTH
-    ? token
-    : undefined;
+  return token && token.length <= MAX_CLICK_TOKEN_LENGTH ? token : undefined;
 }
 
 function identifiesWithoutCookie(identity: Snapshot): boolean {

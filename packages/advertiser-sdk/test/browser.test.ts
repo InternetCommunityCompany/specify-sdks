@@ -151,6 +151,79 @@ describe("advertiser browser client", () => {
     }
   });
 
+  it("never sends events a refusal dropped, even after a later grant", async () => {
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    client.capture("before_refusal");
+    client.setCookieConsent(false);
+    client.capture("after_refusal");
+    client.setCookieConsent(true);
+    client.capture("after_grant");
+
+    await vi.waitFor(() => expect(eventNames(fetchSpy)).toHaveLength(1));
+    await settle();
+    expect(eventNames(fetchSpy)).toEqual([["after_grant"]]);
+  });
+
+  it("sends held events without an identity the visitor gained afterwards", async () => {
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    client.capture("anonymous");
+    client.identify("customer");
+    client.setCookieConsent(true);
+
+    await vi.waitFor(() =>
+      expect(eventNames(fetchSpy)).toEqual([["anonymous"]])
+    );
+    const held = requests(fetchSpy).find((request) =>
+      request.url.endsWith("/events")
+    );
+    expect(held?.body).not.toHaveProperty("userId");
+    expect(held?.body.walletAddresses).toEqual([]);
+  });
+
+  it("holds an anonymous visitor's events when the ad click token is empty", async () => {
+    visit("/landing?spclk=");
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    client.capture("signup");
+    await settle();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    client.setCookieConsent(true);
+    await vi.waitFor(() => expect(eventNames(fetchSpy)).toEqual([["signup"]]));
+    expect(requests(fetchSpy)[0]?.body).not.toHaveProperty("spclk");
+  });
+
+  it("accepts a 1024-character click token and a 256-byte user ID", async () => {
+    const token = "x".repeat(1024);
+    const userId = "é".repeat(128);
+    visit(`/landing?spclk=${token}`);
+    const fetchSpy = mockService();
+    new Specify({ advertiserKey: KEY }).identify(userId);
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(requests(fetchSpy)[0]?.body).toMatchObject({ spclk: token, userId });
+  });
+
+  it.each(["true", 1])(
+    "treats a consent value of %j as a refusal",
+    async (granted) => {
+      const fetchSpy = mockService();
+      const client = new Specify({ advertiserKey: KEY });
+      client.capture("anonymous");
+      client.setCookieConsent(granted as unknown as boolean);
+      client.identify("customer");
+
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+      expect(requests(fetchSpy)[0]).toMatchObject({
+        body: { cookieConsent: false },
+        credentials: "omit",
+        url: "https://spfsrv.com/v1/identify",
+      });
+    }
+  );
+
   it("identifies again with the cookie when consent follows a refusal, and not when it is withdrawn", async () => {
     const fetchSpy = mockService();
     const client = new Specify({ advertiserKey: KEY });
@@ -388,20 +461,104 @@ describe("advertiser browser client", () => {
 
   it("sends to the API URL it was given", async () => {
     const fetchSpy = mockService();
-    new Specify({
-      advertiserKey: KEY,
-      apiUrl: "https://edge.test/specify/",
-    }).identify("customer");
-    new Specify({
-      advertiserKey: KEY,
-      apiUrl: "http://localhost:3000",
-    }).identify("customer");
+    for (const apiUrl of [
+      "https://edge.test/specify/",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://[::1]:3000",
+    ]) {
+      new Specify({ advertiserKey: KEY, apiUrl }).identify("customer");
+    }
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(4));
     expect(requests(fetchSpy).map((request) => request.url)).toEqual([
       "https://edge.test/specify/v1/identify",
       "http://localhost:3000/v1/identify",
+      "http://127.0.0.1:3000/v1/identify",
+      "http://[::1]:3000/v1/identify",
     ]);
+  });
+
+  it("accepts an API URL where URL.canParse doesn't exist", async () => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(class extends URL {}, { canParse: undefined })
+    );
+    const fetchSpy = mockService();
+    expect(
+      () => new Specify({ advertiserKey: KEY, apiUrl: "https://edge.test" })
+    ).not.toThrow();
+    new Specify({ advertiserKey: KEY, apiUrl: "https://edge.test" }).identify(
+      "customer"
+    );
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(requests(fetchSpy)[0]?.url).toBe("https://edge.test/v1/identify");
+  });
+
+  it("neither throws nor returns anything when its internals fail", () => {
+    mockService();
+    vi.stubGlobal("TextEncoder", undefined);
+    const client = new Specify({ advertiserKey: KEY });
+    expect(client.identify("customer")).toBeUndefined();
+    expect(client.capture("purchase")).toBeUndefined();
+    expect(client.setCookieConsent(true)).toBeUndefined();
+    expect(client.reset()).toBeUndefined();
+
+    vi.stubGlobal("window", {
+      get location(): Location {
+        throw new Error("blocked");
+      },
+    });
+    expect(() => {
+      const broken = new Specify({ advertiserKey: KEY });
+      broken.identify("customer");
+      broken.capture("purchase");
+      broken.setCookieConsent(true);
+      broken.reset();
+    }).not.toThrow();
+  });
+
+  it("keeps each client's identity and consent to itself", async () => {
+    const fetchSpy = mockService();
+    const first = new Specify({ advertiserKey: KEY });
+    const second = new Specify({ advertiserKey: KEY });
+    first.identify("first_customer");
+    first.setCookieConsent(true);
+    second.capture("second_anonymous");
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(eventNames(fetchSpy)).toEqual([]);
+    second.setCookieConsent(false);
+    await settle();
+    expect(eventNames(fetchSpy)).toEqual([]);
+  });
+
+  it("never touches cookies or storage, and leaves the URL alone", async () => {
+    const touched: string[] = [];
+    const watch = (name: string) =>
+      new Proxy(
+        {},
+        {
+          get(_target, key) {
+            touched.push(`${name}.${String(key)}`);
+          },
+        }
+      );
+    vi.stubGlobal("localStorage", watch("localStorage"));
+    vi.stubGlobal("sessionStorage", watch("sessionStorage"));
+    const landing = visit("/landing?spclk=click-token");
+    mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    client.identify("customer");
+    client.capture("signup");
+    client.setCookieConsent(true);
+    await settle();
+
+    expect(touched).toEqual([]);
+    expect(globalThis.document?.cookie ?? "").toBe("");
+    expect(window.location.href).toBe(landing);
   });
 
   it("does nothing with an API URL it can't use", async () => {
@@ -412,6 +569,8 @@ describe("advertiser browser client", () => {
       "https://edge.test/?bypass=1",
       "https://edge.test/#specify",
       "https://user:secret@edge.test",
+      "https://user@edge.test",
+      "http://localhost.evil.test",
       "ftp://edge.test",
       1,
     ]) {
@@ -438,17 +597,14 @@ describe("advertiser browser client", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it.runIf(typeof window === "undefined")(
-    "does nothing outside a browser",
-    async () => {
-      vi.unstubAllGlobals();
-      const fetchSpy = mockService();
-      const client = new Specify({ advertiserKey: KEY });
-      client.setCookieConsent(true);
-      client.identify("customer");
-      client.capture("purchase");
-      await settle();
-      expect(fetchSpy).not.toHaveBeenCalled();
-    }
-  );
+  it("does nothing outside a browser", async () => {
+    vi.stubGlobal("window", undefined);
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    client.setCookieConsent(true);
+    client.identify("customer");
+    client.capture("purchase");
+    await settle();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

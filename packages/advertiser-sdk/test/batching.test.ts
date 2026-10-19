@@ -99,14 +99,27 @@ describe("advertiser event batching", () => {
     expect(last).toEqual(["held_50"]);
   });
 
-  it("drops an event too large to send and still sends the rest", async () => {
+  it("drops a held event too large to send and still sends the ones after it", async () => {
     const fetchSpy = mockService();
     const client = new Specify({ advertiserKey: KEY });
     client.capture("x".repeat(MAX_BODY_BYTES));
-    client.identify("customer");
     client.capture("after");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchSpy).not.toHaveBeenCalled();
     client.setCookieConsent(true);
 
     await vi.waitFor(() => expect(names(fetchSpy).flat()).toEqual(["after"]));
+  });
+
+  it("packs held events up to 16 KiB per request", async () => {
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    for (let index = 0; index < 10; index += 1) {
+      client.capture(`${index}`.padEnd(5000, "x"));
+    }
+    client.setCookieConsent(true);
+
+    await vi.waitFor(() => expect(names(fetchSpy).flat()).toHaveLength(10));
+    expect(names(fetchSpy).map((batch) => batch.length)).toEqual([3, 3, 3, 1]);
   });
 });
