@@ -1,9 +1,16 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { dirname, join, resolve, sep } from "node:path";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type {
   AgentConversation,
   AgentReply,
@@ -13,6 +20,10 @@ import type {
 import type { Ui } from "../src/ui/host";
 import { type Choice, WizardCancelled } from "../src/ui/store";
 import { runWizard } from "../src/wizard";
+import { git, isolateGit } from "./git";
+
+/** Nowhere near TMPDIR, so the project path is shown as it is. */
+const HOME = join(sep, "home", "dev");
 
 const AGENT: DetectedAgent = { id: "codex", name: "Codex", version: "1.2.3" };
 const PUBLISHER_HERO = "app/page.tsx - the hero, above the fold";
@@ -43,15 +54,19 @@ beforeAll(async () => {
   );
 });
 
+beforeEach(() => {
+  isolateGit();
+  // What os.homedir() returns: HOME, or USERPROFILE on Windows.
+  vi.stubEnv("HOME", HOME);
+  vi.stubEnv("USERPROFILE", HOME);
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
 });
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
-}
 
 function repository(dirty = false): string {
   const cwd = mkdtempSync(join(tmpdir(), "specify-wizard-"));
