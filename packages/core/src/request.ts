@@ -1,4 +1,4 @@
-import type { Address, ImageFormat, SpecifyAd } from "./types";
+import type { Address, ImageFormat, SpecifyAd } from "./types.js";
 
 const SERVE_URL = "https://spfsrv.com/v1/ads";
 

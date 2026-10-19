@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type Specify from "./index";
-import type { Address, ImageFormat, SpecifyAd } from "./index";
+import type Specify from "./index.js";
+import type { Address, ImageFormat, SpecifyAd } from "./index.js";
 
 /** Options for useSpecifyAd() */
 export interface UseSpecifyAdOptions {

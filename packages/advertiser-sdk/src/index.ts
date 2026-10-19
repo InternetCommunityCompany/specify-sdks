@@ -9,8 +9,8 @@ import {
   eventId,
   MAX_BODY_BYTES,
   send,
-} from "./request";
-import { ADVERTISER_KEY_PATTERN, isUserId, isWallet } from "./validation";
+} from "./request.js";
+import { ADVERTISER_KEY_PATTERN, isUserId, isWallet } from "./validation.js";
 
 const MAX_BATCH_EVENTS = 50;
 const MAX_CLICK_TOKEN_LENGTH = 1024;

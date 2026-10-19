@@ -19,6 +19,7 @@ interface PackageManifest {
   devDependencies?: Record<string, string>;
   exports?: unknown;
   main?: string;
+  name: string;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
@@ -77,6 +78,26 @@ function requireFile(files: string[], path: string): void {
   }
 }
 
+// Under moduleResolution NodeNext, TypeScript resolves a declaration's relative
+// import only with its .js extension. Without one, the imported types silently
+// become any for every integrator using Node ESM.
+function requireResolvableDeclarations(pkg: PackedPackage): void {
+  for (const path of pkg.files.filter((file) => file.endsWith(".d.ts"))) {
+    const source = readFileSync(
+      join(pkg.directory, path.replace("package/", "")),
+      "utf8"
+    );
+    const bare = [...source.matchAll(/(?:from |import\()"(\.\.?\/[^"]+)"/g)]
+      .map(([, specifier]) => specifier)
+      .filter((specifier) => !specifier.endsWith(".js"));
+    if (bare.length > 0) {
+      throw new Error(
+        `${pkg.manifest.name} ${path} imports ${bare.join(", ")} without a .js extension`
+      );
+    }
+  }
+}
+
 try {
   mkdirSync(archivesDirectory, { recursive: true });
   mkdirSync(packagesDirectory, { recursive: true });
@@ -85,6 +106,11 @@ try {
   const publisher = packPackage("packages/publisher-sdk", "publisher-sdk");
   const advertiser = packPackage("packages/advertiser-sdk", "advertiser-sdk");
   const wizard = packPackage("packages/wizard", "wizard");
+
+  for (const pkg of [core, publisher, advertiser]) {
+    requireResolvableDeclarations(pkg);
+  }
+  console.log("Verified declarations resolve under NodeNext");
 
   for (const file of [
     "dist/index.js",

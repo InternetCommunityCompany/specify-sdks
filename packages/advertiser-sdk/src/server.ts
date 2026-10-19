@@ -3,8 +3,8 @@ import {
   ValidationError as CoreValidationError,
 } from "@specify-sh/core";
 
-import { bodyBytes, eventId, MAX_BODY_BYTES, send } from "./request";
-import { ADVERTISER_KEY_PATTERN, isUserId, isWallet } from "./validation";
+import { bodyBytes, eventId, MAX_BODY_BYTES, send } from "./request.js";
+import { ADVERTISER_KEY_PATTERN, isUserId, isWallet } from "./validation.js";
 
 const MAX_DEDUPE_KEY_LENGTH = 256;
 
