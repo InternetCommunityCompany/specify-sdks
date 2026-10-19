@@ -42,6 +42,14 @@ function requestBody(request: RequestInit): unknown {
   return JSON.parse(String(request.body));
 }
 
+// Listeners are promised a call shortly after a change, not within a set
+// number of microtasks, so the wait has to outlast all of them.
+function nextMacrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 describe("Specify", () => {
   describe("constructor", () => {
     it("initializes with a valid publisher key", () => {
@@ -652,7 +660,7 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
         specify.setCookieConsent(true);
         expect(listener).not.toHaveBeenCalled();
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledExactlyOnceWith();
       });
@@ -664,7 +672,7 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
         specify.setCookieConsent(true);
         specify.setCookieConsent(true);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -676,7 +684,7 @@ describe("Specify", () => {
         specify.setCookieConsent(true);
         specify.onIdentityChange(listener);
         specify.setCookieConsent(false);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -687,7 +695,7 @@ describe("Specify", () => {
 
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -698,10 +706,10 @@ describe("Specify", () => {
         const { requests } = setupMockFetch(mockAd);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
 
         expect(listener).not.toHaveBeenCalled();
@@ -721,11 +729,11 @@ describe("Specify", () => {
         for (const address of addresses) {
           specify.identify(address);
         }
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(1);
 
         specify.identify(`0x${"dd".repeat(20)}` as Address);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(2);
       });
 
@@ -736,7 +744,7 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
         specify.setCookieConsent(true);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -752,7 +760,7 @@ describe("Specify", () => {
             "not-an-address" as Address,
           ])
         ).toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -763,7 +771,7 @@ describe("Specify", () => {
 
         specify.onIdentityChange(listener);
         specify.identify([]);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -777,13 +785,13 @@ describe("Specify", () => {
         specify.onIdentityChange(second);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(first).toHaveBeenCalledTimes(1);
         expect(second).toHaveBeenCalledTimes(1);
 
         unsubscribeFirst();
         specify.identify(`0x${"ee".repeat(20)}` as Address);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(first).toHaveBeenCalledTimes(1);
         expect(second).toHaveBeenCalledTimes(2);
       });
@@ -796,12 +804,12 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(2);
 
         firstUnsubscribe();
         specify.identify(`0x${"ee".repeat(20)}` as Address);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(3);
       });
 
@@ -814,7 +822,7 @@ describe("Specify", () => {
         unsubscribe();
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -830,7 +838,7 @@ describe("Specify", () => {
         detachLate = specify.onIdentityChange(late);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(late).not.toHaveBeenCalled();
       });
@@ -846,11 +854,11 @@ describe("Specify", () => {
         specify.onIdentityChange(afterThrower);
 
         expect(() => specify.identify(VALID_MOCK_WALLET_ADDRESS)).not.toThrow();
-        await Promise.resolve();
+        await nextMacrotask();
         expect(afterThrower).toHaveBeenCalledTimes(1);
 
         specify.identify(otherAddress);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(afterThrower).toHaveBeenCalledTimes(2);
       });
 
@@ -864,13 +872,13 @@ describe("Specify", () => {
         );
 
         specify.identify(addresses);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).not.toHaveBeenCalled();
 
         specify.onIdentityChange(listener);
         const fiftyFirst = `0x${"ff".repeat(20)}` as Address;
         specify.identify(fiftyFirst);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(1);
 
         await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
@@ -891,11 +899,11 @@ describe("Specify", () => {
         );
 
         specify.identify(addresses);
-        await Promise.resolve();
+        await nextMacrotask();
         specify.onIdentityChange(listener);
 
         specify.identify(addresses[25] as Address);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -906,7 +914,7 @@ describe("Specify", () => {
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
         specify.onIdentityChange(listener);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -918,10 +926,10 @@ describe("Specify", () => {
         const upper = `0x${"AB".repeat(20)}` as Address;
 
         specify.identify(lower);
-        await Promise.resolve();
+        await nextMacrotask();
         specify.onIdentityChange(listener);
         specify.identify(upper);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -940,7 +948,7 @@ describe("Specify", () => {
         });
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await nextMacrotask();
 
         expect(calls).toEqual([1, 2]);
       });
@@ -953,7 +961,7 @@ describe("Specify", () => {
 
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -969,7 +977,7 @@ describe("Specify", () => {
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
         specify.setCookieConsent(true);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
