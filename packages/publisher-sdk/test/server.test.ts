@@ -50,9 +50,9 @@ function options(walletAddresses: Address[] = [VALID_MOCK_WALLET_ADDRESS]) {
 describe("serve", () => {
   it("returns a 200 body exactly as received", async () => {
     const response = { ...mockAd, serviceMetadata: "unchanged" };
-    setupMockFetch(response);
+    globalThis.fetch = vi.fn().mockResolvedValue(Response.json(response));
 
-    await expect(serve(options())).resolves.toBe(response);
+    await expect(serve(options())).resolves.toEqual(response);
   });
 
   it("sends the server request without browser identity fields", async () => {

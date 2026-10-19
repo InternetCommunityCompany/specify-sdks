@@ -367,13 +367,13 @@ describe("Specify", () => {
         imageUrl: null,
         serviceMetadata: "unchanged",
       };
-      setupMockFetch(response);
+      globalThis.fetch = vi.fn().mockResolvedValue(Response.json(response));
 
       await expect(
         specify.serve(VALID_MOCK_WALLET_ADDRESS, {
           imageFormat: ImageFormat.NO_IMAGE,
         })
-      ).resolves.toBe(response);
+      ).resolves.toEqual(response);
     });
 
     it.each([
