@@ -714,6 +714,39 @@ describe("runWizard (publisher)", () => {
     expect(ui.record.join("\n")).toContain("https://docs.specify.sh/llms.txt");
   });
 
+  it("stops at once, changing nothing, on Ctrl-C while the documentation loads", async () => {
+    const stopping = new AbortController();
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN] });
+    const ui = fakeUi();
+    let fetching: () => void = () => undefined;
+    const fetched = new Promise<void>((started) => {
+      fetching = started;
+    });
+    const stalled = ((_url: string, init?: RequestInit) => {
+      fetching();
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason)
+        );
+      });
+    }) as unknown as typeof fetch;
+
+    const run = runWizard({
+      cwd: repository(),
+      fetchImpl: stalled,
+      mode: "publisher",
+      seam,
+      signal: stopping.signal,
+      ui,
+    });
+    await fetched;
+    stopping.abort();
+
+    await expect(run).resolves.toBe(0);
+    expect(seam.conversations).toBe(0);
+    expect(ui.record).toEqual(["Stopped. Nothing was changed."]);
+  });
+
   it("stops cleanly when the developer presses Ctrl-C at a prompt", async () => {
     const seam = fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] });
     const ui = fakeUi();

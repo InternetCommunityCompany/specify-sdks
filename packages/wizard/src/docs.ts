@@ -4,6 +4,9 @@ const INDEX_URL = "https://docs.specify.sh/llms.txt";
 // A bundle bigger than this stops helping and starts drowning the prompt, so
 // an oversized one is treated as absent rather than inlined.
 const BUNDLE_LIMIT_BYTES = 512_000;
+// Room for the bundle on a slow connection. Without a deadline, a stalled one
+// holds the run for undici's own five-minute timeouts.
+const FETCH_TIMEOUT_MS = 30_000;
 
 /** What the wizard knows about the documentation as the run starts. */
 export interface Docs {
@@ -23,10 +26,13 @@ function docsError(url: string, cause?: unknown): Error {
   });
 }
 
-async function fetchIndex(fetchImpl: typeof fetch): Promise<string> {
+async function fetchIndex(
+  fetchImpl: typeof fetch,
+  signal: AbortSignal
+): Promise<string> {
   let response: Response;
   try {
-    response = await fetchImpl(INDEX_URL);
+    response = await fetchImpl(INDEX_URL, { signal });
   } catch (error) {
     throw docsError(INDEX_URL, error);
   }
@@ -43,10 +49,11 @@ async function fetchIndex(fetchImpl: typeof fetch): Promise<string> {
 /** The bundle is an optimisation, so failing to get one fails nothing. */
 async function fetchBundle(
   fetchImpl: typeof fetch,
-  mode: SdkMode
+  mode: SdkMode,
+  signal: AbortSignal
 ): Promise<string | undefined> {
   const url = `https://docs.specify.sh/${SDK_CONFIG[mode].section}/llms-full.txt`;
-  const response = await fetchImpl(url).catch(() => undefined);
+  const response = await fetchImpl(url, { signal }).catch(() => undefined);
   if (!response?.ok) {
     return undefined;
   }
@@ -69,15 +76,20 @@ async function fetchBundle(
  *
  * @param mode The SDK to set up.
  * @param fetchImpl The fetch to use, injected so tests never reach the network.
+ * @param signal The run's stop. No prompt is open while the docs load, so
+ * Ctrl-C reaches the fetch only through this.
  * @returns The index, and the selected section's bundle when one is published.
  */
 export async function fetchDocs(
   mode: SdkMode,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal
 ): Promise<Docs> {
+  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const [index, bundle] = await Promise.all([
-    fetchIndex(fetchImpl),
-    fetchBundle(fetchImpl, mode),
+    fetchIndex(fetchImpl, deadline),
+    fetchBundle(fetchImpl, mode, deadline),
   ]);
   return bundle === undefined ? { index } : { bundle, index };
 }
