@@ -118,15 +118,29 @@ describe.each<{ mode: SdkMode; section: string }>([
     });
   });
 
+  it("inlines a bundle right at the size limit", async () => {
+    const fetchImpl = docsFetch({
+      [bundleUrl]: new Response("x".repeat(512_000)),
+      [INDEX_URL]: new Response("# Specify"),
+    });
+
+    const docs = await fetchDocs(mode, fetchImpl);
+
+    expect(docs.bundle?.length).toBe(512_000);
+  });
+
   it("still fails the run when the index cannot be fetched", async () => {
     const fetchImpl = docsFetch({
       [bundleUrl]: new Response("# Docs"),
       [INDEX_URL]: new Response("private details", { status: 503 }),
     });
 
-    await expect(fetchDocs(mode, fetchImpl)).rejects.toThrow(
-      "Could not fetch https://docs.specify.sh/llms.txt. Check your connection and retry."
+    const error = await fetchDocs(mode, fetchImpl).catch(
+      (reason: unknown) => reason
     );
+
+    expect(error).toMatchObject({ message: INDEX_ERROR });
+    expect(String(error)).not.toContain("private details");
   });
 
   it("preserves a network failure on the index as the public error cause", async () => {
