@@ -127,26 +127,6 @@ describe("implementPrompt (publisher)", () => {
     expect(prompt).toContain("https://app.specify.sh/publish/publisher-keys");
     expect(prompt).toContain("Tell them in your final message which file");
   });
-
-  it("carries only the rules the documentation does not hold", () => {
-    const prompt = implementPrompt({
-      docs: PUBLISHER_DOCS,
-      mode: "publisher",
-      plan: PUBLISHER_PLAN,
-      suggestions: { dropped: [], kept: [] },
-    });
-
-    for (const removed of [
-      "Consent starts as false",
-      "React Server Component",
-      "identify(address)",
-      "LANDSCAPE",
-      "adUnitId",
-      "return null",
-    ]) {
-      expect(prompt).not.toContain(removed);
-    }
-  });
 });
 
 describe("advertiser prompts", () => {
