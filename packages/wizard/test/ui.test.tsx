@@ -5,6 +5,10 @@ import type { SdkMode } from "../src/sdk";
 import { App } from "../src/ui/app";
 import { WizardCancelled, WizardStore } from "../src/ui/store";
 
+// React only treats act() as a test boundary with this flag set. Testing
+// Library sets it, ink-testing-library doesn't.
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
 const PUBLISHER_PLAN = {
   details:
     "## What I found\n\nA **Next.js** app with `bun.lock`.\n\n- No consent banner",
