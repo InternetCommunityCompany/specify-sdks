@@ -11,7 +11,7 @@ execSync("bun run tsc --emitDeclarationOnly -p tsconfig.build.json", {
 
 const result = await build({
   drop: ["debugger"],
-  entrypoints: ["./src/index.ts"],
+  entrypoints: ["./src/index.ts", "./src/server.ts", "./src/react-server.ts"],
   env: "disable",
   external: ["@specify-sh/core"],
   format: "esm",

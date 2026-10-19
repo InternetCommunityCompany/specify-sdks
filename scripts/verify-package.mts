@@ -91,6 +91,11 @@ try {
     "dist/index.js.map",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
+    "dist/server.js",
+    "dist/server.js.map",
+    "dist/server.d.ts",
+    "dist/server.d.ts.map",
+    "dist/react-server.js",
     "README.md",
     "LICENSE",
   ]) {
@@ -327,24 +332,33 @@ try {
 import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
 import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
 import { useSpecifyAd, type UseSpecifyAdOptions } from "@specify-sh/publisher-sdk/react";
-import Advertiser, { type Address as AdvertiserAddress, type CaptureOptions, type SpecifyInitConfig as AdvertiserInitConfig } from "@specify-sh/advertiser-sdk";
-const advertiserServerConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key" };
-const advertiserServer = new Advertiser(advertiserServerConfig);
-const advertiserCaptureOptions: CaptureOptions = { url: "https://shop.example/purchase" };
-const advertiserEvent: Promise<number | null> = advertiserServer.capture("purchase", "customer", advertiserCaptureOptions);
-const advertiserIdentification: Promise<number | null> = advertiserServer.identify("customer");
-const omittedIdentity: Promise<number | null> = advertiserServer.capture("purchase");
-void advertiserEvent;
-void advertiserIdentification;
-void omittedIdentity;
-const advertiserConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key" };
+import Advertiser, { type Address as AdvertiserAddress, type SpecifyInitConfig as AdvertiserInitConfig } from "@specify-sh/advertiser-sdk";
+import { type Address as AdvertiserServerAddress, type CaptureOptions as AdvertiserCaptureOptions, capture as advertiserCapture, ValidationError as AdvertiserValidationError, type ValidationError as AdvertiserValidationErrorType } from "@specify-sh/advertiser-sdk/server";
+const advertiserConfig: AdvertiserInitConfig = { advertiserKey: "sak_0123456789abcdef0123456789abcd" };
 const advertiserClient = new Advertiser(advertiserConfig);
-advertiserClient.setCookieConsent(true);
-const identification: Promise<number | null> = advertiserClient.identify(null);
-void identification;
+const consented: void = advertiserClient.setCookieConsent(true);
 const advertiserWallet: AdvertiserAddress = "0x1111111111111111111111111111111111111111";
+const identified: void = advertiserClient.identify("customer");
 advertiserClient.identify(advertiserWallet);
 advertiserClient.identify([advertiserWallet]);
+const captured: void = advertiserClient.capture("purchase");
+const forgotten: void = advertiserClient.reset();
+const advertiserServerWallet: AdvertiserServerAddress = advertiserWallet;
+const advertiserCaptureOptions: AdvertiserCaptureOptions = { advertiserKey: advertiserConfig.advertiserKey, dedupeKey: "order_1", event: "purchase", identity: advertiserServerWallet, url: "https://shop.example/purchase" };
+const advertiserServerEvent: Promise<void> = advertiserCapture(advertiserCaptureOptions);
+function advertiserValidationMessage(error: unknown): string {
+  if (error instanceof AdvertiserValidationError) {
+    const validation: AdvertiserValidationErrorType = error;
+    return validation.message;
+  }
+  return "";
+}
+void consented;
+void identified;
+void captured;
+void forgotten;
+void advertiserServerEvent;
+void advertiserValidationMessage;
 const coreAddress: CoreAddress = "0x1234567890123456789012345678901234567890";
 const coreImageFormat: CoreImageFormatType = CoreImageFormat.LANDSCAPE;
 const coreRequest: AdRequest = { imageFormat: coreImageFormat, publisherKey: "spk_1234567890abcdef1234567890abcd", walletAddresses: [coreAddress] };
@@ -429,22 +443,21 @@ void WalletAdSlot;
 import Specify, * as browser from "@specify-sh/publisher-sdk";
 import * as server from "@specify-sh/publisher-sdk/server";
 import * as advertiser from "@specify-sh/advertiser-sdk";
+import * as advertiserServer from "@specify-sh/advertiser-sdk/server";
 const sameKeys = (actual, expected) => JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(expected);
 if (!sameKeys(advertiser, ["default"])) process.exit(1);
+if (!sameKeys(advertiserServer, ["ValidationError", "capture"])) process.exit(1);
+if (advertiserServer.ValidationError !== core.ValidationError) process.exit(1);
 let serverRequest;
 let serverUrl;
 let advertiserRequests = 0;
 globalThis.fetch = async (url, request) => { advertiserRequests++; serverUrl = url; serverRequest = request; return new Response(null, { status: 204 }); };
-const serverClient = new advertiser.default({ advertiserKey: "advertiser-test-key" });
-if (await serverClient.capture("purchase", " Customer ") !== 204) process.exit(1);
-if (serverRequest.credentials !== "omit") process.exit(1);
+if (await advertiserServer.capture({ advertiserKey: "sak_0123456789abcdef0123456789abcd", event: "purchase", identity: " Customer " }) !== undefined) process.exit(1);
+if (serverUrl !== "https://spfsrv.com/v1/events" || "credentials" in serverRequest || "keepalive" in serverRequest) process.exit(1);
 const serverBody = JSON.parse(serverRequest.body);
-if (!sameKeys(serverBody, ["events", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.events[0], ["name"]) || serverBody.events[0].name !== "purchase") process.exit(1);
-if (await serverClient.identify(" Customer ") !== 204) process.exit(1);
-if (serverUrl !== "https://spfsrv.com/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
-const identificationBody = JSON.parse(serverRequest.body);
-if (!sameKeys(identificationBody, ["identity", "source"]) || identificationBody.source !== "server" || identificationBody.identity !== " Customer ") process.exit(1);
-if (await serverClient.capture("missing_identity") !== null || advertiserRequests !== 2) process.exit(1);
+if (!sameKeys(serverBody, ["events", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.events[0], ["id", "name"]) || serverBody.events[0].name !== "purchase") process.exit(1);
+const rejection = await advertiserServer.capture({ advertiserKey: "advertiser-test-key", event: "purchase", identity: "customer" }).then(() => null, (error) => error);
+if (!(rejection instanceof core.ValidationError) || advertiserRequests !== 1) process.exit(1);
 if (!sameKeys(core, ["ImageFormat", "MAX_WALLET_ADDRESSES", "ValidationError", "assertValidAddresses", "assertValidPublisherKey", "prepareWalletAddresses", "requestAd"])) process.exit(1);
 if (!sameKeys(browser, ["ImageFormat", "ValidationError", "default"])) process.exit(1);
 if (!sameKeys(server, ["ImageFormat", "ValidationError", "serve"])) process.exit(1);
@@ -459,10 +472,10 @@ if (browser.ValidationError !== core.ValidationError || server.ValidationError !
   writeFileSync(
     join(consumerDirectory, "advertiser-browser.ts"),
     `import Advertiser from "@specify-sh/advertiser-sdk";
-const advertiserClient = new Advertiser({ advertiserKey: "advertiser-test-key" });
+const advertiserClient = new Advertiser({ advertiserKey: "sak_0123456789abcdef0123456789abcd" });
 advertiserClient.identify("customer");
-advertiserClient.setCookieConsent(true);
-globalThis.advertiserCapture = advertiserClient.capture("purchase");`
+advertiserClient.capture("purchase");
+advertiserClient.setCookieConsent(true);`
   );
   execFileSync(
     "bun",
@@ -482,14 +495,15 @@ globalThis.advertiserCapture = advertiserClient.capture("purchase");`
       `import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 const dom = new JSDOM("", { runScripts: "outside-only", url: "https://shop.example/?spclk=secret" });
-let browserRequest;
+const browserRequests = [];
 dom.window.TextEncoder = TextEncoder;
-dom.window.fetch = async (_url, request) => { browserRequest = request; return { status: 204 }; };
+dom.window.fetch = async (url, request) => { browserRequests.push({ request, url }); return { status: 204 }; };
 try {
   dom.window.eval(readFileSync(process.argv[1], "utf8"));
-  if (await dom.window.advertiserCapture !== 204) process.exit(1);
-  if (browserRequest.credentials !== "include") process.exit(1);
-  const body = JSON.parse(browserRequest.body);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  if (JSON.stringify(browserRequests.map(({ url }) => url)) !== JSON.stringify(["https://spfsrv.com/v1/identify", "https://spfsrv.com/v1/events"])) process.exit(1);
+  if (browserRequests.some(({ request }) => request.credentials !== "include")) process.exit(1);
+  const body = JSON.parse(browserRequests[1].request.body);
   if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.events[0].url).searchParams.get("spclk") !== "secret") process.exit(1);
   if (!dom.window.location.search.includes("spclk")) process.exit(1);
 } finally {
@@ -515,6 +529,21 @@ try {
     '@specify-sh/publisher-sdk cannot be imported from a React Server Component. Import { serve } from "@specify-sh/publisher-sdk/server" instead.'
   ) {
     throw new Error(`Unexpected react-server guard: ${guardMessage}`);
+  }
+  const advertiserGuardMessage = execFileSync(
+    "node",
+    [
+      "--conditions=react-server",
+      "-e",
+      'import("@specify-sh/advertiser-sdk").then(() => process.exit(1)).catch((error) => { console.log(error.message); }); import("@specify-sh/advertiser-sdk/server").catch(() => process.exit(1));',
+    ],
+    { cwd: consumerDirectory, encoding: "utf8" }
+  ).trim();
+  if (
+    advertiserGuardMessage !==
+    '@specify-sh/advertiser-sdk cannot be imported from a React Server Component. Import { capture } from "@specify-sh/advertiser-sdk/server" instead.'
+  ) {
+    throw new Error(`Unexpected react-server guard: ${advertiserGuardMessage}`);
   }
   console.log("Verified default and react-server conditional resolution");
 

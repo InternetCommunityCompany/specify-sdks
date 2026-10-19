@@ -18,7 +18,7 @@ The same package is imported into a browser page and into a Node server.
 ## Repo Conventions
 
 - Nothing identifying is ever module-scoped. Module state is one user in a browser and every concurrent request on a server, so anything held there leaks between users. State belongs on an instance.
-- Never throw into the host. Every public entry point catches its own errors and resolves to a safe empty result. The host's own work must not fail because ours did.
+- Never throw into the host. Every public entry point catches its own errors and resolves to a safe empty result. The host's own work must not fail because ours did. The one exception is a server entry point given invalid input: it throws `ValidationError`, because a loud failure beats a silently lost billable event. Our own failures never throw.
 - Don't detect the environment at module scope — it breaks SSR and confuses bundlers. Decide at call time, or let the shape of the API carry it.
 - No DOM in a path the server reaches, no Node built-ins in a path the browser reaches. `exports` conditions resolve the right build instead of failing at runtime.
 - Browser-only features no-op on a server. They don't throw.
