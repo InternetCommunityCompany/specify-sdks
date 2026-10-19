@@ -1,3 +1,4 @@
+const EDGE_SERVER_URL = "https://spfsrv.com/v1";
 
 export const MAX_BODY_BYTES = 16 * 1024;
 
@@ -28,7 +29,7 @@ export async function requestAdvertiser(
         60_000
       );
     }
-    const response = await fetch(`${SERVICE_URL}/${operation}`, {
+    const response = await fetch(`${EDGE_SERVER_URL}/${operation}`, {
       body: serializedBody,
       credentials,
       headers: {
