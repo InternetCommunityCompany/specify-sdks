@@ -16,6 +16,7 @@ import type {
   AgentReply,
   AgentSeam,
   DetectedAgent,
+  TurnOptions,
 } from "../src/agent";
 import type { Ui } from "../src/ui/host";
 import { type Choice, WizardCancelled } from "../src/ui/store";
@@ -24,6 +25,10 @@ import { git, isolateGit } from "./git";
 
 /** Nowhere near TMPDIR, so the project path is shown as it is. */
 const HOME = join(sep, "home", "dev");
+const TURN_ERROR =
+  "The coding agent could not complete the request. Check its authentication and try again.";
+const STOPPED_MID_RUN =
+  "Stopped. The agent may already have changed files, so check git status.";
 
 const AGENT: DetectedAgent = { id: "codex", name: "Codex", version: "1.2.3" };
 const PUBLISHER_HERO = "app/page.tsx - the hero, above the fold";
@@ -185,6 +190,7 @@ function fakeUi(answers: Answers = {}): FakeUi {
 
 interface FakeSeam extends AgentSeam {
   asks: string[];
+  closes: number;
   conversations: number;
   schemas: (Record<string, unknown> | undefined)[];
   works: string[];
@@ -192,8 +198,12 @@ interface FakeSeam extends AgentSeam {
 
 function fakeSeam(options: {
   agents?: DetectedAgent[];
-  onWork?: () => void;
-  plans?: (unknown | undefined)[];
+  close?: () => Promise<void>;
+  onAsk?: () => void;
+  onWork?: (opts?: TurnOptions) => void;
+  /** One per ask, in order. An Error fails that turn instead. */
+  plans?: unknown[];
+  workError?: Error;
 }): FakeSeam {
   const plans = [...(options.plans ?? [])];
   const asks: string[] = [];
@@ -201,6 +211,7 @@ function fakeSeam(options: {
   const works: string[] = [];
   const seam: FakeSeam = {
     asks,
+    closes: 0,
     conversations: 0,
     detect: () => Promise.resolve(options.agents ?? [AGENT]),
     open(): AgentConversation {
@@ -209,16 +220,25 @@ function fakeSeam(options: {
         ask: (prompt, opts): Promise<AgentReply> => {
           asks.push(prompt);
           schemas.push(opts?.schema);
+          options.onAsk?.();
           if (plans.length === 0) {
             throw new Error("The fake agent ran out of plans");
           }
-          return Promise.resolve({ json: plans.shift(), text: "" });
+          const plan = plans.shift();
+          return plan instanceof Error
+            ? Promise.reject(plan)
+            : Promise.resolve({ json: plan, text: "" });
         },
-        close: () => Promise.resolve(),
-        work: (prompt): Promise<AgentReply> => {
+        close: () => {
+          seam.closes += 1;
+          return options.close?.() ?? Promise.resolve();
+        },
+        work: (prompt, opts): Promise<AgentReply> => {
           works.push(prompt);
-          options.onWork?.();
-          return Promise.resolve({ text: "done" });
+          options.onWork?.(opts);
+          return options.workError
+            ? Promise.reject(options.workError)
+            : Promise.resolve({ text: "done" });
         },
       };
     },
@@ -325,8 +345,12 @@ describe("runWizard (publisher)", () => {
       ui,
     });
 
-    const contract = ui.shown.find((line) => line.startsWith("How this works"));
-    expect(contract).toBeDefined();
+    const shownAt = ui.shown.findIndex((line) =>
+      line.startsWith("How this works")
+    );
+    expect(shownAt).toBeGreaterThanOrEqual(0);
+    expect(shownAt).toBeLessThan(ui.shown.indexOf("Reading the project"));
+    const contract = ui.shown[shownAt];
     expect(contract).toContain("Nothing is written until you approve");
     expect(contract).toContain("stay uncommitted in your working tree");
     expect(contract).toContain("never to Specify");
@@ -798,6 +822,64 @@ describe("runWizard (publisher)", () => {
     expect(ui.record.join("\n")).toContain("check git status");
   });
 
+  it("stops at exit code 0 when the agent honours a stop mid-turn", async () => {
+    const stopping = new AbortController();
+    const seam = fakeSeam({
+      onAsk: () => stopping.abort(),
+      plans: [new Error(TURN_ERROR)],
+    });
+    const ui = fakeUi();
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        signal: stopping.signal,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(ui.finished).toContain("Read the project failed: stopped");
+    expect(ui.record).toEqual([STOPPED_MID_RUN]);
+    expect(seam.works).toEqual([]);
+    expect(seam.closes).toBe(1);
+  });
+
+  it("fails at exit code 1 when the write turn fails, without saying what it changed", async () => {
+    const cwd = repository();
+    const seam = fakeSeam({
+      onWork: (opts) => {
+        mkdirSync(join(cwd, "lib"));
+        writeFileSync(join(cwd, "lib/specify.ts"), "// half a client\n");
+        opts?.onActivity?.({
+          change: "create",
+          kind: "file",
+          path: "lib/specify.ts",
+        });
+        opts?.onActivity?.({
+          input: { command: "npm install @specify-sh/publisher-sdk" },
+          kind: "tool",
+          name: "bash",
+        });
+      },
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+      workError: new Error(TURN_ERROR),
+    });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({ cwd, fetchImpl: docsFetch(), mode: "publisher", seam, ui })
+    ).resolves.toBe(1);
+
+    expect(ui.finished).toContain(
+      "Write the changes failed: stopped after 2 steps, 1 file"
+    );
+    expect(seam.closes).toBe(1);
+    expect(ui.record).toEqual([TURN_ERROR]);
+  });
+
   it("names the cause of a failure only when asked to be verbose", async () => {
     const failing: AgentSeam = {
       detect: () => Promise.resolve([AGENT]),
@@ -837,6 +919,74 @@ describe("runWizard (publisher)", () => {
   });
 });
 
+describe("the agent session", () => {
+  it.each([
+    {
+      code: 0,
+      name: "a finished run",
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+      review: ["approve"],
+    },
+    {
+      code: 0,
+      name: "an aborted plan",
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+      review: ["abort"],
+    },
+    {
+      code: 1,
+      name: "two replies that are not a plan",
+      plans: [undefined, { details: "" }],
+      review: [],
+    },
+    {
+      code: 1,
+      name: "a failed turn",
+      plans: [new Error(TURN_ERROR)],
+      review: [],
+    },
+  ])("is closed exactly once after $name", async ({ code, plans, review }) => {
+    const seam = fakeSeam({ plans });
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui: fakeUi({ review }),
+      })
+    ).resolves.toBe(code);
+
+    expect(seam.closes).toBe(1);
+  });
+
+  it("warns when it will not close, without failing a finished run", async () => {
+    const message =
+      "Could not close the coding agent session. Stop the coding agent and try again.";
+    const seam = fakeSeam({
+      close: () => Promise.reject(new Error(message)),
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+    });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(ui.shown).toContain(message);
+    expect(ui.record.join("\n")).toContain(
+      "Read the changes, then run your app."
+    );
+  });
+});
+
 describe("advertiser wizard", () => {
   const purchase = {
     file: "src/checkout.ts",
@@ -865,9 +1015,10 @@ describe("advertiser wizard", () => {
     const cwd = repository();
     const urls: string[] = [];
     const ui = fakeUi({ multiselect: [[purchaseLabel]], review: ["approve"] });
+    let askedBeforeWork: string[] = [];
     const seam = fakeSeam({
       onWork: () => {
-        expect(ui.asked).toContain("Go ahead with this plan?");
+        askedBeforeWork = [...ui.asked];
         writeFileSync(join(cwd, ".env.local"), "KEY=sak_your_key_here\n");
         writeFileSync(join(cwd, ".env.publisher"), "KEY=spk_your_key_here\n");
         writeFileSync(join(cwd, "analytics.ts"), "// advertiser client\n");
@@ -891,6 +1042,7 @@ describe("advertiser wizard", () => {
     ]);
     expect(seam.asks[0]).toContain("add the Specify advertiser SDK");
     expect(seam.schemas[0]?.required).toEqual(["details", "events", "summary"]);
+    expect(askedBeforeWork).toContain("Go ahead with this plan?");
     expect(ui.offered).toContainEqual([purchaseLabel, signupLabel]);
     expect(ui.finished).toContain("Review the plan: 1 event");
     expect(seam.works[0]).toContain(
