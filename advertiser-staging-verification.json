@@ -1,0 +1,220 @@
+{
+  "flow": {
+    "marker": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95",
+    "orgs": [
+      "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+      "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-b"
+    ],
+    "wallet": "0xd302514a8620c2eda4cdffa2a1b6b5b04bac9beb",
+    "outcomes": [
+      "SDK consent denial sends no request",
+      "Backend consent denial persists nothing",
+      "Browser user event and durable mapping persisted; cookie returned",
+      "Exact same user ID has independent mappings across organizations",
+      "Wallet/user merge persists oldest survivor and replacement",
+      "Cache eviction recovers user/wallet mappings and preserves organization isolation",
+      "Cookie identity from a separate wallet merges into existing older user identity",
+      "Authenticated landing identity resolves survivor and token is removed from stored URL"
+    ],
+    "mappings": [
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-b",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "spid": "01a13840-f94d-76a4-b763-4a213f762840"
+      }
+    ],
+    "replacements": [
+      {
+        "spid_prev": "01a13841-05e8-734c-a7f8-9200bbd50e65",
+        "spid_new": "01a13840-de12-75ec-bb9f-592a01a86132"
+      }
+    ],
+    "cookieReplacement": [
+      {
+        "spid_new": "01a13840-de12-75ec-bb9f-592a01a86132"
+      }
+    ],
+    "events": [
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-browser-user",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": "https://staging-test.example/checkout",
+        "source": "browser",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "105f8e0f-a9b6-4d1b-8c74-539bc0ae5231"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-server-repeat",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": null,
+        "source": "server",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "1e3fbcff-4e58-48b7-b540-74bbdbc5efbe"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-b",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-other-org",
+        "spid": "01a13840-f94d-76a4-b763-4a213f762840",
+        "url": null,
+        "source": "server",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "03bcbe39-c528-47b7-b672-8505b4f3cbea"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-wallet-first",
+        "spid": "01a13841-05e8-734c-a7f8-9200bbd50e65",
+        "url": null,
+        "source": "server",
+        "user_id": null,
+        "event_id": "33049254-e7f4-467a-b01d-bac9709aaa51"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-merge",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": "https://staging-test.example/checkout",
+        "source": "browser",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "72558eb0-6e7f-4b88-b743-1a994d085784"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-cold-user",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": null,
+        "source": "server",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "8f2da49e-d880-4b96-b97e-f9082cc62162"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-cold-wallet",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": null,
+        "source": "server",
+        "user_id": null,
+        "event_id": "f8d26020-b014-4438-9d99-b35ca19ca6db"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-b",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-cold-other-org",
+        "spid": "01a13840-f94d-76a4-b763-4a213f762840",
+        "url": null,
+        "source": "server",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "a7dfc9bc-be00-46cd-9430-87ecadc2706a"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-anonymous",
+        "spid": "01a13841-5e15-731b-8753-4ad2e08fe8a2",
+        "url": "https://staging-test.example/checkout",
+        "source": "browser",
+        "user_id": null,
+        "event_id": "c1229eba-b4aa-4570-b1f6-1b3be4620a11"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-cookie-merge",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": "https://staging-test.example/checkout",
+        "source": "browser",
+        "user_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-user",
+        "event_id": "5eca5929-dbbd-4c4f-ae30-5616a7a9660b"
+      },
+      {
+        "advertiser_organization_id": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-org-a",
+        "event_name": "stage-e2e-2026-10-14T02-32-13-462Z-3000cf95-landing",
+        "spid": "01a13840-de12-75ec-bb9f-592a01a86132",
+        "url": "https://staging-test.example/landing",
+        "source": "browser",
+        "user_id": null,
+        "event_id": "d12be6a4-c274-47bc-89fd-49774ab7400c"
+      }
+    ],
+    "limitations": [
+      "Current POST served over local Bun HTTP with live staging stores; SDK fetch redirected only to local handler",
+      "Browser SDK uses a simulated window and explicit cookie jar; native browser CORS/cookie policies untested",
+      "Landing token minted with production createLandingToken; click redirect itself not exercised"
+    ]
+  },
+  "reverse": {
+    "success": true,
+    "marker": "stage-reverse-06f8479f-d71b-4ad1-99e8-2e3a0dae14ec",
+    "org": "stage-reverse-06f8479f-d71b-4ad1-99e8-2e3a0dae14ec-org",
+    "user": "stage-reverse-06f8479f-d71b-4ad1-99e8-2e3a0dae14ec-user",
+    "wallet": "0xd4eee4895b7e9b80aa7cfdf493ddb5a7151bd099",
+    "older": "01a13840-7b4f-75a8-a3f6-3ab7db29be65",
+    "younger": "01a13840-88e1-7335-9824-e3ae9d46bfb0",
+    "mappingsBefore": [
+      {
+        "spid": "01a13840-88e1-7335-9824-e3ae9d46bfb0"
+      }
+    ],
+    "mappingsAfter": [
+      {
+        "spid": "01a13840-7b4f-75a8-a3f6-3ab7db29be65"
+      }
+    ],
+    "replacements": [
+      {
+        "spid_prev": "01a13840-88e1-7335-9824-e3ae9d46bfb0",
+        "spid_new": "01a13840-7b4f-75a8-a3f6-3ab7db29be65"
+      }
+    ],
+    "eventCount": 4,
+    "outcomes": [
+      "Older wallet survives younger user via cookie merge",
+      "Durable user mapping initially remains on loser",
+      "Cold user capture follows durable replacement and repairs mapping"
+    ]
+  },
+  "native": {
+    "success": true,
+    "marker": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52",
+    "org": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-org",
+    "user": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-user",
+    "browserResult": {
+      "results": [null, 200, 200],
+      "httpOnlyCookieHidden": true
+    },
+    "events": [
+      {
+        "event_name": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-cookie-only",
+        "spid": "01a13841-d82e-74e7-9cf3-5f6fad6b6cb9",
+        "source": "browser",
+        "user_id": null,
+        "url": "http://localhost:3420/"
+      },
+      {
+        "event_name": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-user",
+        "spid": "01a13841-d82e-74e7-9cf3-5f6fad6b6cb9",
+        "source": "browser",
+        "user_id": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-user",
+        "url": "http://localhost:3420/"
+      },
+      {
+        "event_name": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-later-server",
+        "spid": "01a13841-d82e-74e7-9cf3-5f6fad6b6cb9",
+        "source": "server",
+        "user_id": "stage-native-c97995d4-43a9-48bb-976c-47bc1c9ebc52-user",
+        "url": null
+      }
+    ],
+    "mappings": [
+      {
+        "spid": "01a13841-d82e-74e7-9cf3-5f6fad6b6cb9"
+      }
+    ],
+    "scope": "Native browser, bundled current SDK, local same-origin HTTP proxy to current handler and staging stores; production cross-site cookie policies not covered",
+    "laterServerVerified": true
+  }
+}

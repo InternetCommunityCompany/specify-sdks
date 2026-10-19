@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { PLACEHOLDER_PUBLISHER_KEY } from "./prompts";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,10 +89,14 @@ async function readText(path: string): Promise<string> {
  * is searched, which is where every framework this SDK supports reads them.
  *
  * @param cwd The project the agent worked in.
+ * @param placeholder The key placeholder to look for.
  * @returns The file names, relative to the project, or none if the search
  * failed or the placeholder is not there.
  */
-export async function envFilesWithPlaceholder(cwd: string): Promise<string[]> {
+export async function envFilesWithPlaceholder(
+  cwd: string,
+  placeholder: string
+): Promise<string[]> {
   let names: string[];
   try {
     names = (await readdir(cwd)).filter((name) => name.startsWith(".env"));
@@ -102,9 +105,7 @@ export async function envFilesWithPlaceholder(cwd: string): Promise<string[]> {
   }
   const found = await Promise.all(
     names.map(async (name) =>
-      (await readText(join(cwd, name))).includes(PLACEHOLDER_PUBLISHER_KEY)
-        ? name
-        : undefined
+      (await readText(join(cwd, name))).includes(placeholder) ? name : undefined
     )
   );
   return found.filter((name): name is string => name !== undefined).sort();

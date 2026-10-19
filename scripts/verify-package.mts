@@ -83,7 +83,22 @@ try {
 
   const core = packPackage("packages/core", "core");
   const publisher = packPackage("packages/publisher-sdk", "publisher-sdk");
+  const advertiser = packPackage("packages/advertiser-sdk", "advertiser-sdk");
   const wizard = packPackage("packages/wizard", "wizard");
+
+  for (const file of [
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map",
+    "README.md",
+    "LICENSE",
+  ]) {
+    requireFile(advertiser.files, file);
+  }
+  if (advertiser.files.some((path) => path.startsWith("package/src/"))) {
+    throw new Error("Advertiser tarball must not contain source files");
+  }
 
   requireFile(core.files, "dist/index.js");
   requireFile(core.files, "dist/index.js.map");
@@ -191,7 +206,13 @@ try {
   if (!wizardCli.startsWith("#!/usr/bin/env node")) {
     throw new Error("The packed wizard CLI must start with a Node shebang");
   }
-  for (const dependency of ["anyagent-js", "giggles", "ink", "react"]) {
+  for (const dependency of [
+    "anyagent-js",
+    "giggles",
+    "ink",
+    "ink-text-input",
+    "react",
+  ]) {
     if (!wizard.manifest.dependencies?.[dependency]) {
       throw new Error(`Wizard must declare ${dependency} in dependencies`);
     }
@@ -232,27 +253,37 @@ try {
       "The installed wizard must print usage through its bin shim"
     );
   }
-  try {
-    execFileSync(
-      join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
-      [],
-      {
-        cwd: wizardConsumerDirectory,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 3000,
+  if (!wizardHelp.includes("--advertiser  Add the advertiser SDK")) {
+    throw new Error("The installed wizard must advertise advertiser setup");
+  }
+  for (const args of [[], ["--publisher"], ["--advertiser"]]) {
+    const advertiserMode = args.includes("--advertiser");
+    const guide = advertiserMode
+      ? "https://docs.specify.sh/advertising/analytics-sdk-setup"
+      : "https://docs.specify.sh/publishing/get-started";
+    try {
+      execFileSync(
+        join(wizardConsumerDirectory, "node_modules/.bin/specify-wizard"),
+        args,
+        {
+          cwd: wizardConsumerDirectory,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 3000,
+        }
+      );
+      throw new Error("The installed wizard must reject closed stdin");
+    } catch (error) {
+      if (
+        !(error instanceof Error && "status" in error) ||
+        error.status !== 1 ||
+        !("stderr" in error) ||
+        typeof error.stderr !== "string" ||
+        !error.stderr.includes("needs a real terminal") ||
+        !error.stderr.includes(guide)
+      ) {
+        throw error;
       }
-    );
-    throw new Error("The installed wizard must reject closed stdin");
-  } catch (error) {
-    if (
-      !(error instanceof Error && "status" in error) ||
-      error.status !== 1 ||
-      !("stderr" in error) ||
-      typeof error.stderr !== "string" ||
-      !error.stderr.includes("needs a real terminal")
-    ) {
-      throw error;
     }
   }
   console.log("Verified the installed wizard runs through its bin shim");
@@ -271,6 +302,7 @@ try {
     join(consumerDirectory, "package.json"),
     JSON.stringify({
       dependencies: {
+        "@specify-sh/advertiser-sdk": `file:${advertiser.tarball}`,
         "@specify-sh/core": `file:${core.tarball}`,
         "@specify-sh/publisher-sdk": `file:${publisher.tarball}`,
         "@types/react": reactTypesVersion,
@@ -287,7 +319,7 @@ try {
     cwd: consumerDirectory,
     stdio: "inherit",
   });
-  console.log("Installed both local tarballs into an empty consumer");
+  console.log("Installed SDK tarballs into an empty consumer");
 
   writeFileSync(
     join(consumerDirectory, "consumer.ts"),
@@ -295,6 +327,24 @@ try {
 import Specify, { type Address, ImageFormat, type ImageFormat as ImageFormatType, type SpecifyAd, type SpecifyInitConfig, ValidationError } from "@specify-sh/publisher-sdk";
 import { type Address as ServerAddress, ImageFormat as ServerImageFormat, type ImageFormat as ServerImageFormatType, serve, type ServeOptions, type SpecifyAd as ServerSpecifyAd, ValidationError as ServerValidationError, type ValidationError as ServerValidationErrorType } from "@specify-sh/publisher-sdk/server";
 import { useSpecifyAd, type UseSpecifyAdOptions } from "@specify-sh/publisher-sdk/react";
+import Advertiser, { type Address as AdvertiserAddress, type CaptureOptions, type SpecifyInitConfig as AdvertiserInitConfig } from "@specify-sh/advertiser-sdk";
+const advertiserServerConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key" };
+const advertiserServer = new Advertiser(advertiserServerConfig);
+const advertiserCaptureOptions: CaptureOptions = { url: "https://shop.example/purchase" };
+const advertiserEvent: Promise<number | null> = advertiserServer.capture("purchase", "customer", advertiserCaptureOptions);
+const advertiserIdentification: Promise<number | null> = advertiserServer.identify("customer");
+const omittedIdentity: Promise<number | null> = advertiserServer.capture("purchase");
+void advertiserEvent;
+void advertiserIdentification;
+void omittedIdentity;
+const advertiserConfig: AdvertiserInitConfig = { advertiserKey: "advertiser-test-key" };
+const advertiserClient = new Advertiser(advertiserConfig);
+advertiserClient.setCookieConsent(true);
+const identification: Promise<number | null> = advertiserClient.identify(null);
+void identification;
+const advertiserWallet: AdvertiserAddress = "0x1111111111111111111111111111111111111111";
+advertiserClient.identify(advertiserWallet);
+advertiserClient.identify([advertiserWallet]);
 const coreAddress: CoreAddress = "0x1234567890123456789012345678901234567890";
 const coreImageFormat: CoreImageFormatType = CoreImageFormat.LANDSCAPE;
 const coreRequest: AdRequest = { imageFormat: coreImageFormat, publisherKey: "spk_1234567890abcdef1234567890abcd", walletAddresses: [coreAddress] };
@@ -378,7 +428,23 @@ void WalletAdSlot;
       `import * as core from "@specify-sh/core";
 import Specify, * as browser from "@specify-sh/publisher-sdk";
 import * as server from "@specify-sh/publisher-sdk/server";
+import * as advertiser from "@specify-sh/advertiser-sdk";
 const sameKeys = (actual, expected) => JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(expected);
+if (!sameKeys(advertiser, ["default"])) process.exit(1);
+let serverRequest;
+let serverUrl;
+let advertiserRequests = 0;
+globalThis.fetch = async (url, request) => { advertiserRequests++; serverUrl = url; serverRequest = request; return new Response(null, { status: 204 }); };
+const serverClient = new advertiser.default({ advertiserKey: "advertiser-test-key" });
+if (await serverClient.capture("purchase", " Customer ") !== 204) process.exit(1);
+if (serverRequest.credentials !== "omit") process.exit(1);
+const serverBody = JSON.parse(serverRequest.body);
+if (!sameKeys(serverBody, ["events", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.events[0], ["name"]) || serverBody.events[0].name !== "purchase") process.exit(1);
+if (await serverClient.identify(" Customer ") !== 204) process.exit(1);
+if (serverUrl !== "https://spfsrv.com/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
+const identificationBody = JSON.parse(serverRequest.body);
+if (!sameKeys(identificationBody, ["identity", "source"]) || identificationBody.source !== "server" || identificationBody.identity !== " Customer ") process.exit(1);
+if (await serverClient.capture("missing_identity") !== null || advertiserRequests !== 2) process.exit(1);
 if (!sameKeys(core, ["ImageFormat", "MAX_WALLET_ADDRESSES", "ValidationError", "assertValidAddresses", "assertValidPublisherKey", "prepareWalletAddresses", "requestAd"])) process.exit(1);
 if (!sameKeys(browser, ["ImageFormat", "ValidationError", "default"])) process.exit(1);
 if (!sameKeys(server, ["ImageFormat", "ValidationError", "serve"])) process.exit(1);
@@ -389,6 +455,51 @@ if (browser.ValidationError !== core.ValidationError || server.ValidationError !
     { cwd: consumerDirectory, stdio: "inherit" }
   );
   console.log("Verified runtime exports and shared core identity");
+
+  writeFileSync(
+    join(consumerDirectory, "advertiser-browser.ts"),
+    `import Advertiser from "@specify-sh/advertiser-sdk";
+const advertiserClient = new Advertiser({ advertiserKey: "advertiser-test-key" });
+advertiserClient.identify("customer");
+advertiserClient.setCookieConsent(true);
+globalThis.advertiserCapture = advertiserClient.capture("purchase");`
+  );
+  execFileSync(
+    "bun",
+    [
+      "build",
+      "advertiser-browser.ts",
+      "--target=browser",
+      "--outfile=advertiser-browser.js",
+    ],
+    { cwd: consumerDirectory, stdio: "inherit" }
+  );
+  execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
+const dom = new JSDOM("", { runScripts: "outside-only", url: "https://shop.example/?spclk=secret" });
+let browserRequest;
+dom.window.TextEncoder = TextEncoder;
+dom.window.fetch = async (_url, request) => { browserRequest = request; return { status: 204 }; };
+try {
+  dom.window.eval(readFileSync(process.argv[1], "utf8"));
+  if (await dom.window.advertiserCapture !== 204) process.exit(1);
+  if (browserRequest.credentials !== "include") process.exit(1);
+  const body = JSON.parse(browserRequest.body);
+  if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.events[0].url).searchParams.get("spclk") !== "secret") process.exit(1);
+  if (!dom.window.location.search.includes("spclk")) process.exit(1);
+} finally {
+  dom.window.close();
+}`,
+      join(consumerDirectory, "advertiser-browser.js"),
+    ],
+    { stdio: "inherit" }
+  );
+  console.log("Verified packed advertiser SDK in Node and a browser bundle");
 
   const guardMessage = execFileSync(
     "node",
