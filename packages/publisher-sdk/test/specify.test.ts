@@ -3,6 +3,7 @@ import Specify, {
   type Address,
   ImageFormat,
   type SpecifyAd,
+  type SpecifyInitConfig,
   ValidationError,
 } from "../src";
 import { VALID_MOCK_PUBLISHER_KEY, VALID_MOCK_WALLET_ADDRESS } from "./consts";
@@ -56,6 +57,15 @@ describe("Specify", () => {
         () => new Specify({ publisherKey: `spk_${"a".repeat(31)}` })
       ).toThrow(ValidationError);
     });
+
+    it.each([undefined, null, 1])(
+      "throws ValidationError for a missing or non-string key (%s)",
+      (publisherKey) => {
+        expect(
+          () => new Specify({ publisherKey } as unknown as SpecifyInitConfig)
+        ).toThrow(ValidationError);
+      }
+    );
   });
 
   describe("serve", () => {
