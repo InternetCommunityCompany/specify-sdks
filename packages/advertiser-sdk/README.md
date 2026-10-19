@@ -42,8 +42,8 @@ reading cookies or resolving browser identity.
 
 ### `identify(identity)`
 
-Selects an exact user ID or remembers wallets immediately, then calls
-`/v1/identify` when consent is granted. Identification persists identity without
+Selects an exact user ID or remembers wallets immediately, then sends the
+identity to Specify when consent is granted. Identification persists identity without
 recording an event. Identifying a new user ID replaces the previous ID;
 identifying wallets retains it. Empty strings and invalid wallets leave previous
 state intact. Other user IDs update local state before service validation.
@@ -71,8 +71,8 @@ token are sent together, up to 50 events and 16 KiB of JSON per request. Each ev
 keeps its captured URL.
 With consent, new captures send directly, even while the buffer is flushing.
 They may reach the service before older buffered events or finish out of order.
-Identification sends independently and never blocks captures: `/v1/events`
-resolves the identity in each event's snapshot itself. Sending starts immediately;
+Identification sends independently and never blocks captures: each event
+carries its own identity snapshot. Sending starts immediately;
 there is no timer that waits for more events.
 
 An explicit identity applies only to that event and replaces the remembered user
@@ -139,10 +139,6 @@ server calls without identity, network failures, and timeouts are contained with
 into the host or logging automatically. Requests time out after 60 seconds when
 AbortController is available.
 An individual request exceeding 16 KiB of JSON returns null without transport.
-
-The events endpoint accepts an `events` array with shared identity fields. Deploy
-the matching Edge endpoint before using this SDK version; the previous singular
-`event` request format is no longer sent.
 
 Requests are attempted once, with no automatic retries or durable offline queue.
 A lost response does not establish whether storage succeeded. Development keys
