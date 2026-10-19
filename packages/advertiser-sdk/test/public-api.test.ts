@@ -59,7 +59,17 @@ describe("advertiser browser API", () => {
     client.setCookieConsent(true);
     await client.capture("remembered_identity");
 
-    const [, userOverride, walletOverride, remembered] = bodies(fetchSpy);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(4));
+    const requests = bodies(fetchSpy);
+    const userOverride = requests.find(
+      (body) => body.events?.[0].name === "user_override"
+    );
+    const walletOverride = requests.find(
+      (body) => body.events?.[0].name === "wallet_override"
+    );
+    const remembered = requests.find(
+      (body) => body.events?.[0].name === "remembered_identity"
+    );
     expect(userOverride).toMatchObject({
       userId: "other",
       walletAddresses: [],
@@ -70,7 +80,6 @@ describe("advertiser browser API", () => {
       userId: "remembered",
       walletAddresses: [WALLET_A],
     });
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
   it.runIf(typeof window === "undefined")(
@@ -143,7 +152,7 @@ describe.runIf(typeof window !== "undefined")(
       expect(bodies(fetchSpy)[0]).not.toHaveProperty("userId");
     });
 
-    it("buffers capture snapshots and drains them once in order", async () => {
+    it("preserves buffered snapshots when live captures overtake the flush", async () => {
       const fetchSpy = mockService();
       const client = new Specify({ advertiserKey: "key" });
       const originalUrl = window.location.href;
@@ -167,21 +176,25 @@ describe.runIf(typeof window !== "undefined")(
         client.setCookieConsent(true);
         await client.capture("third");
         client.setCookieConsent(true);
-        const [identity, first, second, third] = bodies(fetchSpy);
+        await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(4));
+        const [identity, first, third, second] = bodies(fetchSpy);
         expect(identity.userId).toBe("B");
         expect(first).toMatchObject({
-          event: { name: "first", url: firstUrl },
+          events: [{ name: "first", url: firstUrl }],
           spclk: "one",
           userId: "A",
           walletAddresses: [WALLET_A],
         });
         expect(second).toMatchObject({
-          event: { name: "second", url: secondUrl },
+          events: [{ name: "second", url: secondUrl }],
           userId: "B",
           walletAddresses: [WALLET_B],
         });
-        expect(third.event.name).toBe("third");
-        expect(fetchSpy).toHaveBeenCalledTimes(4);
+        expect(third).toMatchObject({
+          events: [{ name: "third", url: secondUrl }],
+          userId: "B",
+          walletAddresses: [WALLET_B],
+        });
       } finally {
         window.history.replaceState(null, "", originalUrl);
       }
@@ -193,10 +206,10 @@ describe.runIf(typeof window !== "undefined")(
       await client.capture("cookie_only");
       client.setCookieConsent(true);
       await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-      expect(bodies(fetchSpy)[0].event.name).toBe("cookie_only");
+      expect(bodies(fetchSpy)[0].events[0].name).toBe("cookie_only");
     });
 
-    it("serializes identification before capture so cookies can reach later requests", async () => {
+    it("sends captures with remembered identity before identification finishes", async () => {
       const fetchSpy = mockService();
       let finish: ((value: Response) => void) | undefined;
       fetchSpy.mockImplementationOnce(
@@ -209,10 +222,11 @@ describe.runIf(typeof window !== "undefined")(
       client.setCookieConsent(true);
       const identification = client.identify("A");
       const capture = client.capture("purchase");
-      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(bodies(fetchSpy)[1].userId).toBe("A");
+      await expect(capture).resolves.toBe(200);
       finish?.(new Response(null, { status: 200 }));
       await expect(identification).resolves.toBe(200);
-      await expect(capture).resolves.toBe(200);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
@@ -228,6 +242,7 @@ describe.runIf(typeof window !== "undefined")(
       const client = new Specify({ advertiserKey: "key" });
       client.setCookieConsent(true);
       const sentIdentification = client.identify("A");
+      client.setCookieConsent(false);
       const pendingIdentification = client.identify("B");
       const pendingCapture = client.capture("before_reset");
 
@@ -236,7 +251,8 @@ describe.runIf(typeof window !== "undefined")(
 
       await expect(sentIdentification).resolves.toBe(200);
       await expect(pendingIdentification).resolves.toBeNull();
-      await expect(pendingCapture).resolves.toBe(200);
+      await expect(pendingCapture).resolves.toBeNull();
+      client.setCookieConsent(true);
       await expect(client.capture("after_reset")).resolves.toBe(200);
       expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
         "https://spfsrv.com/v1/identify",
@@ -244,7 +260,7 @@ describe.runIf(typeof window !== "undefined")(
         "https://spfsrv.com/v1/events",
       ]);
       expect(bodies(fetchSpy)[1]).toMatchObject({
-        event: { name: "before_reset" },
+        events: [{ name: "before_reset" }],
         userId: "B",
       });
       expect(bodies(fetchSpy)[2]).not.toHaveProperty("userId");
@@ -272,7 +288,7 @@ describe.runIf(typeof window !== "undefined")(
         const secondUrl = window.location.href;
         const secondIdentification = client.identify("B");
         const secondCapture = client.capture("second");
-        expect(fetchSpy).toHaveBeenCalledOnce();
+        expect(fetchSpy).toHaveBeenCalledTimes(4);
         finish?.(new Response(null, { status: 200 }));
         await expect(
           Promise.all([
@@ -287,13 +303,13 @@ describe.runIf(typeof window !== "undefined")(
           bodies(fetchSpy);
         expect(firstIdentity).toMatchObject({ spclk: "one", userId: "A" });
         expect(firstEvent).toMatchObject({
-          event: { name: "first", url: firstUrl },
+          events: [{ name: "first", url: firstUrl }],
           spclk: "one",
           userId: "A",
         });
         expect(secondIdentity).toMatchObject({ spclk: "two", userId: "B" });
         expect(secondEvent).toMatchObject({
-          event: { name: "second", url: secondUrl },
+          events: [{ name: "second", url: secondUrl }],
           spclk: "two",
           userId: "B",
         });
@@ -323,15 +339,14 @@ describe.runIf(typeof window !== "undefined")(
       expect(fetchSpy).toHaveBeenCalledOnce();
       client.setCookieConsent(true);
       await client.capture("last");
-      expect(bodies(fetchSpy).map((body) => body.event.name)).toEqual([
-        "first",
-        "second",
-        "third",
-        "last",
-      ]);
+      expect(
+        bodies(fetchSpy).flatMap((body) =>
+          body.events.map((event: { name: string }) => event.name)
+        )
+      ).toEqual(["first", "second", "third", "last"]);
     });
 
-    it("contains failures, advances the queue, and never automatically retries", async () => {
+    it("contains identification failures without blocking captures or retrying", async () => {
       const fetchSpy = mockService();
       fetchSpy.mockRejectedValueOnce(new Error("Offline"));
       const client = new Specify({ advertiserKey: "key" });
@@ -349,7 +364,7 @@ describe.runIf(typeof window !== "undefined")(
       await client.capture("second");
       client.setCookieConsent(true);
       await client.capture("third");
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
     it("rejects invalid identification without changing the selected identity", async () => {

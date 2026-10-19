@@ -1,4 +1,6 @@
-const SERVICE_URL = "https://spfsrv.com/v1";
+const EDGE_SERVER_URL = "https://spfsrv.com/v1";
+
+export const MAX_BODY_BYTES = 16 * 1024;
 
 export async function requestAdvertiser(
   advertiserKey: string,
@@ -9,6 +11,12 @@ export async function requestAdvertiser(
 ): Promise<number | null> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    const serializedBody = JSON.stringify(body);
+
+    if (new TextEncoder().encode(serializedBody).byteLength > MAX_BODY_BYTES) {
+      return null;
+    }
+
     const controller = globalThis.AbortController
       ? new AbortController()
       : undefined;
@@ -21,8 +29,8 @@ export async function requestAdvertiser(
         60_000
       );
     }
-    const response = await fetch(`${SERVICE_URL}/${operation}`, {
-      body: JSON.stringify(body),
+    const response = await fetch(`${EDGE_SERVER_URL}/${operation}`, {
+      body: serializedBody,
       credentials,
       headers: {
         "Content-Type": "application/json",

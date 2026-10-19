@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchDocs } from "../src/docs";
+import type { SdkMode } from "../src/sdk";
 
 const INDEX_URL = "https://docs.specify.sh/llms.txt";
-const BUNDLE_URL = "https://docs.specify.sh/publishing/llms-full.txt";
 
 function docsFetch(replies: Record<string, Response | Error>): typeof fetch {
   return ((url: string) => {
@@ -16,14 +16,18 @@ function docsFetch(replies: Record<string, Response | Error>): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-describe("fetchDocs", () => {
-  it("fetches the index and the publishing bundle, and nothing else", async () => {
+describe.each<{ mode: SdkMode; section: string }>([
+  { mode: "publisher", section: "publishing" },
+  { mode: "advertiser", section: "advertising" },
+])("fetchDocs ($mode)", ({ mode, section }) => {
+  const bundleUrl = `https://docs.specify.sh/${section}/llms-full.txt`;
+  it("fetches the index and the selected bundle, and nothing else", async () => {
     const fetchImpl = docsFetch({
-      [BUNDLE_URL]: new Response("# Next.js\n\nInstall the SDK."),
+      [bundleUrl]: new Response("# Next.js\n\nInstall the SDK."),
       [INDEX_URL]: new Response("# Specify"),
     });
 
-    await expect(fetchDocs(fetchImpl)).resolves.toEqual({
+    await expect(fetchDocs(mode, fetchImpl)).resolves.toEqual({
       bundle: "# Next.js\n\nInstall the SDK.",
       index: "# Specify",
     });
@@ -31,43 +35,51 @@ describe("fetchDocs", () => {
 
   it("carries on without a bundle when the site does not serve one", async () => {
     const fetchImpl = docsFetch({
-      [BUNDLE_URL]: new Response("not here", { status: 404 }),
+      [bundleUrl]: new Response("not here", { status: 404 }),
       [INDEX_URL]: new Response("# Specify"),
     });
 
-    await expect(fetchDocs(fetchImpl)).resolves.toEqual({ index: "# Specify" });
+    await expect(fetchDocs(mode, fetchImpl)).resolves.toEqual({
+      index: "# Specify",
+    });
   });
 
   it("carries on without a bundle when fetching it fails", async () => {
     const fetchImpl = docsFetch({
-      [BUNDLE_URL]: new Error("socket failed"),
+      [bundleUrl]: new Error("socket failed"),
       [INDEX_URL]: new Response("# Specify"),
     });
 
-    await expect(fetchDocs(fetchImpl)).resolves.toEqual({ index: "# Specify" });
+    await expect(fetchDocs(mode, fetchImpl)).resolves.toEqual({
+      index: "# Specify",
+    });
   });
 
   it("treats an empty or oversized bundle as absent", async () => {
     const empty = docsFetch({
-      [BUNDLE_URL]: new Response("   \n"),
+      [bundleUrl]: new Response("   \n"),
       [INDEX_URL]: new Response("# Specify"),
     });
-    await expect(fetchDocs(empty)).resolves.toEqual({ index: "# Specify" });
+    await expect(fetchDocs(mode, empty)).resolves.toEqual({
+      index: "# Specify",
+    });
 
     const oversized = docsFetch({
-      [BUNDLE_URL]: new Response("x".repeat(512_001)),
+      [bundleUrl]: new Response("x".repeat(512_001)),
       [INDEX_URL]: new Response("# Specify"),
     });
-    await expect(fetchDocs(oversized)).resolves.toEqual({ index: "# Specify" });
+    await expect(fetchDocs(mode, oversized)).resolves.toEqual({
+      index: "# Specify",
+    });
   });
 
   it("still fails the run when the index cannot be fetched", async () => {
     const fetchImpl = docsFetch({
-      [BUNDLE_URL]: new Response("# Docs"),
+      [bundleUrl]: new Response("# Docs"),
       [INDEX_URL]: new Response("private details", { status: 503 }),
     });
 
-    await expect(fetchDocs(fetchImpl)).rejects.toThrow(
+    await expect(fetchDocs(mode, fetchImpl)).rejects.toThrow(
       "Could not fetch https://docs.specify.sh/llms.txt. Check your connection and retry."
     );
   });
@@ -80,6 +92,6 @@ describe("fetchDocs", () => {
         : Promise.resolve(new Response("# Docs"))
     );
 
-    await expect(fetchDocs(fetchMock)).rejects.toMatchObject({ cause });
+    await expect(fetchDocs(mode, fetchMock)).rejects.toMatchObject({ cause });
   });
 });

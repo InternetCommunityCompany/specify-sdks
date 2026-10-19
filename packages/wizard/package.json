@@ -1,7 +1,7 @@
 {
   "name": "@specify-sh/wizard",
   "version": "0.2.1",
-  "description": "Add the Specify publisher SDK with your installed coding agent",
+  "description": "Add the Specify publisher or advertiser SDK with your installed coding agent",
   "homepage": "https://github.com/InternetCommunityCompany/specify-sdks#readme",
   "bugs": "https://github.com/InternetCommunityCompany/specify-sdks/issues",
   "repository": {
@@ -26,6 +26,7 @@
     "anyagent-js": "0.4.0",
     "giggles": "^0.7.3",
     "ink": "^6.8.0",
+    "ink-text-input": "^6.0.0",
     "react": "^19.2.8"
   },
   "devDependencies": {

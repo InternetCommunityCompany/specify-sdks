@@ -1,3 +1,5 @@
+import type { SdkMode } from "./sdk";
+
 /** One place the agent proposes putting an ad. */
 export interface Placement {
   file: string;
@@ -7,12 +9,12 @@ export interface Placement {
 /** What the agent reports back before anything is written. */
 export interface Plan {
   details: string;
-  placements: Placement[];
+  suggestions: string[];
   summary: string;
 }
 
-/** What the developer kept from the placements the agent suggested. */
-export interface ChosenPlacements {
+/** What the developer kept from the agent's suggestions. */
+export interface ChosenSuggestions {
   dropped: string[];
   kept: string[];
 }
@@ -25,7 +27,7 @@ export interface ChosenPlacements {
  * running commentary can no longer end up concatenated onto the front of the
  * plan, and placements arrive as data instead of headings to scrape.
  */
-export const PLAN_SCHEMA = {
+export const PUBLISHER_PLAN_SCHEMA = {
   additionalProperties: false,
   properties: {
     details: {
@@ -65,6 +67,51 @@ export const PLAN_SCHEMA = {
   type: "object",
 } as const satisfies Record<string, unknown>;
 
+export const ADVERTISER_PLAN_SCHEMA = {
+  additionalProperties: false,
+  properties: {
+    details: {
+      description:
+        "The plan itself, as markdown: what you found, what you would change, and anything the developer should know before approving. Use headings and lists. Do not include your own progress commentary, and do not list events here — propose those only in the events field, because the wizard presents them to the developer separately.",
+      type: "string",
+    },
+    events: {
+      description:
+        "Every product event you propose capturing. Empty if this project has no sensible events to capture.",
+      items: {
+        additionalProperties: false,
+        properties: {
+          file: {
+            description:
+              "The file the event capture would go in, as a path from the project root.",
+            type: "string",
+          },
+          name: {
+            description: "The event name to pass to the SDK.",
+            type: "string",
+          },
+          reason: {
+            description:
+              "One short line on why this event, for the developer to choose from.",
+            type: "string",
+          },
+          trigger: {
+            description:
+              "When to capture this event, including whether it runs in the browser or on the server.",
+            type: "string",
+          },
+        },
+        required: ["file", "name", "reason", "trigger"],
+        type: "object",
+      },
+      type: "array",
+    },
+    summary: PUBLISHER_PLAN_SCHEMA.properties.summary,
+  },
+  required: ["details", "events", "summary"],
+  type: "object",
+} as const satisfies Record<string, unknown>;
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -78,6 +125,20 @@ function placementOf(value: unknown): Placement | undefined {
   return path ? { file: path, reason: text(reason) } : undefined;
 }
 
+function eventLabel(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  const { file, name, reason, trigger } = value as Record<string, unknown>;
+  const path = text(file);
+  const event = text(name);
+  const when = text(trigger);
+  if (!(path && event && when)) {
+    return;
+  }
+  return [event, path, when, text(reason)].filter(Boolean).join(" - ");
+}
+
 /**
  * The plan a turn replied with, or nothing if it did not answer in the shape
  * that was asked for.
@@ -87,22 +148,40 @@ function placementOf(value: unknown): Placement | undefined {
  * enough to parse but not well enough to be useful.
  *
  * @param reply The validated JSON value from the turn.
+ * @param mode The SDK the plan describes.
  * @returns The plan, or `undefined` when there is nothing worth showing.
  */
-export function readPlan(reply: unknown): Plan | undefined {
+export function readPlan(reply: unknown, mode: SdkMode): Plan | undefined {
   if (typeof reply !== "object" || reply === null) {
     return;
   }
-  const { details, placements, summary } = reply as Record<string, unknown>;
+  const { details, events, placements, summary } = reply as Record<
+    string,
+    unknown
+  >;
   const body = text(details);
   if (!body) {
     return;
   }
+  const suggestions: string[] = [];
+  if (mode === "advertiser" && Array.isArray(events)) {
+    for (const entry of events) {
+      const label = eventLabel(entry);
+      if (label) {
+        suggestions.push(label);
+      }
+    }
+  } else if (mode === "publisher" && Array.isArray(placements)) {
+    for (const entry of placements) {
+      const placement = placementOf(entry);
+      if (placement) {
+        suggestions.push(placementLabel(placement));
+      }
+    }
+  }
   return {
     details: body,
-    placements: Array.isArray(placements)
-      ? placements.flatMap((entry) => placementOf(entry) ?? [])
-      : [],
+    suggestions,
     summary: text(summary),
   };
 }

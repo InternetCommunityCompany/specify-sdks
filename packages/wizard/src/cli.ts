@@ -1,20 +1,19 @@
 import { readFile } from "node:fs/promises";
 import process from "node:process";
 import { anyAgentSeam } from "./agent";
+import { SDK_CONFIG, type SdkMode } from "./sdk";
 import { startUi } from "./ui/host";
 import { runWizard } from "./wizard";
 
-const ADVERTISER_GUIDE =
-  "https://docs.specify.sh/advertising/analytics-sdk-setup";
-const PUBLISHER_GUIDE = "https://docs.specify.sh/publishing/get-started";
-const USAGE = `Usage: specify-wizard [--publisher] [--verbose]
+const USAGE = `Usage: specify-wizard [--publisher | --advertiser] [--verbose]
 
---advertiser  Not available yet
+--publisher   Add the publisher SDK (default)
+--advertiser  Add the advertiser SDK
 --verbose     Show the cause of a failure
 --help        Show help
 --version     Show version`;
 
-type Mode = "publisher" | "advertiser" | "help" | "version";
+type Mode = SdkMode | "help" | "version";
 
 interface Args {
   mode: Mode;
@@ -57,7 +56,10 @@ async function packageVersion(): Promise<string> {
   return typeof manifest.version === "string" ? manifest.version : "unknown";
 }
 
-async function runPublisher(verbose: boolean): Promise<number> {
+async function runIntegration(
+  mode: SdkMode,
+  verbose: boolean
+): Promise<number> {
   // Ctrl-C between prompts reaches us as SIGINT, and the agent turn in
   // flight has to be told, or its CLI keeps running after the wizard exits.
   const stopping = new AbortController();
@@ -65,12 +67,14 @@ async function runPublisher(verbose: boolean): Promise<number> {
   process.on("SIGINT", stop);
   const ui = startUi({
     input: process.stdin,
+    mode,
     onCancel: stop,
     output: process.stdout,
   });
   try {
     return await runWizard({
       cwd: process.cwd(),
+      mode,
       seam: anyAgentSeam(),
       signal: stopping.signal,
       ui,
@@ -93,19 +97,13 @@ async function runCli(): Promise<number> {
       process.stdout.write(`${await packageVersion()}\n`);
       return 0;
     }
-    if (mode === "advertiser") {
-      process.stderr.write(
-        `Advertiser setup is not available yet. Follow ${ADVERTISER_GUIDE} for the current status.\n`
-      );
-      return 1;
-    }
     if (!process.stdin.isTTY) {
       process.stderr.write(
-        `The publisher wizard needs a real terminal. To add the SDK by hand, follow ${PUBLISHER_GUIDE}.\n`
+        `The ${mode} wizard needs a real terminal. To add the SDK by hand, follow ${SDK_CONFIG[mode].guide}.\n`
       );
       return 1;
     }
-    return await runPublisher(verbose);
+    return await runIntegration(mode, verbose);
   } catch (error) {
     process.stderr.write(
       `${

@@ -15,18 +15,19 @@ import { type Choice, WizardCancelled } from "../src/ui/store";
 import { runWizard } from "../src/wizard";
 
 const AGENT: DetectedAgent = { id: "codex", name: "Codex", version: "1.2.3" };
-const HERO = "app/page.tsx - the hero, above the fold";
-const SIDEBAR = "app/blog/page.tsx - between the list and the footer";
-const DETAILS = "## What I found\n\nA Next.js app with the App Router.";
-const PLAN = {
-  details: DETAILS,
+const PUBLISHER_HERO = "app/page.tsx - the hero, above the fold";
+const PUBLISHER_SIDEBAR = "app/blog/page.tsx - between the list and the footer";
+const PUBLISHER_DETAILS =
+  "## What I found\n\nA Next.js app with the App Router.";
+const PUBLISHER_PLAN = {
+  details: PUBLISHER_DETAILS,
   placements: [
     { file: "app/page.tsx", reason: "the hero, above the fold" },
     { file: "app/blog/page.tsx", reason: "between the list and the footer" },
   ],
   summary: "A Next.js app that needs the client and one slot.",
 };
-const PLAN_WITHOUT_PLACEMENTS = {
+const PUBLISHER_PLAN_WITHOUT_PLACEMENTS = {
   details: "## What I found\n\nA plain site built with esbuild.",
   placements: [],
   summary: "A plain esbuild site.",
@@ -170,6 +171,7 @@ function fakeUi(answers: Answers = {}): FakeUi {
 interface FakeSeam extends AgentSeam {
   asks: string[];
   conversations: number;
+  schemas: (Record<string, unknown> | undefined)[];
   works: string[];
 }
 
@@ -180,6 +182,7 @@ function fakeSeam(options: {
 }): FakeSeam {
   const plans = [...(options.plans ?? [])];
   const asks: string[] = [];
+  const schemas: (Record<string, unknown> | undefined)[] = [];
   const works: string[] = [];
   const seam: FakeSeam = {
     asks,
@@ -188,8 +191,9 @@ function fakeSeam(options: {
     open(): AgentConversation {
       seam.conversations += 1;
       return {
-        ask: (prompt): Promise<AgentReply> => {
+        ask: (prompt, opts): Promise<AgentReply> => {
           asks.push(prompt);
+          schemas.push(opts?.schema);
           if (plans.length === 0) {
             throw new Error("The fake agent ran out of plans");
           }
@@ -203,6 +207,7 @@ function fakeSeam(options: {
         },
       };
     },
+    schemas,
     works,
   };
   return seam;
@@ -211,7 +216,7 @@ function fakeSeam(options: {
 function docsFetch(urls: string[] = []): typeof fetch {
   return ((url: string) => {
     urls.push(String(url));
-    // No publishing bundle in these runs, so the index path is exercised.
+    // No section bundle in these runs, so the index path is exercised.
     return Promise.resolve(
       String(url).endsWith("llms-full.txt")
         ? new Response("not here", { status: 404 })
@@ -220,7 +225,7 @@ function docsFetch(urls: string[] = []): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-describe("runWizard", () => {
+describe("runWizard (publisher)", () => {
   it("plans, implements and reports the changes", async () => {
     const cwd = repository();
     const urls: string[] = [];
@@ -230,12 +235,21 @@ describe("runWizard", () => {
         writeFileSync(join(cwd, "lib/specify.ts"), "// client\n");
         writeFileSync(join(cwd, ".env.local"), "KEY=spk_your_key_here\n");
       },
-      plans: [PLAN],
+      plans: [PUBLISHER_PLAN],
     });
-    const ui = fakeUi({ multiselect: [[HERO, SIDEBAR]], review: ["approve"] });
+    const ui = fakeUi({
+      multiselect: [[PUBLISHER_HERO, PUBLISHER_SIDEBAR]],
+      review: ["approve"],
+    });
 
     await expect(
-      runWizard({ cwd, fetchImpl: docsFetch(urls), seam, ui })
+      runWizard({
+        cwd,
+        fetchImpl: docsFetch(urls),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(urls).toContain("https://docs.specify.sh/llms.txt");
@@ -246,22 +260,27 @@ describe("runWizard", () => {
     expect(seam.asks[0]).toContain("[Next.js](/publishing/nextjs)");
     expect(seam.works).toHaveLength(1);
     expect(seam.works[0]).toContain("<specify-docs-index>");
-    expect(seam.works[0]).toContain(DETAILS);
+    expect(seam.works[0]).toContain(PUBLISHER_DETAILS);
     expect(seam.works[0]).toContain("Do not commit");
-    expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
+    expect(seam.works[0]).toContain(
+      `Build these and no others:\n- ${PUBLISHER_HERO}`
+    );
     expect(ui.finished).toContain("Choose a coding agent: Codex 1.2.3");
-    expect(ui.finished).toContain(`Read the project: ${PLAN.summary}`);
+    expect(ui.finished).toContain(
+      `Read the project: ${PUBLISHER_PLAN.summary}`
+    );
     expect(ui.record.join("\n")).toContain("lib/specify.ts");
     expect(ui.record.join("\n")).toContain("New files, not yet tracked by Git");
   });
 
   it("walks the developer through numbered steps", async () => {
-    const ui = fakeUi({ multiselect: [[HERO]], review: ["approve"] });
+    const ui = fakeUi({ multiselect: [[PUBLISHER_HERO]], review: ["approve"] });
 
     await runWizard({
       cwd: repository(),
       fetchImpl: docsFetch(),
-      seam: fakeSeam({ plans: [PLAN] }),
+      mode: "publisher",
+      seam: fakeSeam({ plans: [PUBLISHER_PLAN] }),
       ui,
     });
 
@@ -280,13 +299,14 @@ describe("runWizard", () => {
   });
 
   it("says what will happen before the agent is let loose", async () => {
-    const ui = fakeUi({ multiselect: [[HERO]], review: ["approve"] });
+    const ui = fakeUi({ multiselect: [[PUBLISHER_HERO]], review: ["approve"] });
     const cwd = repository();
 
     await runWizard({
       cwd,
       fetchImpl: docsFetch(),
-      seam: fakeSeam({ plans: [PLAN] }),
+      mode: "publisher",
+      seam: fakeSeam({ plans: [PUBLISHER_PLAN] }),
       ui,
     });
 
@@ -315,7 +335,10 @@ describe("runWizard", () => {
             kind: "tool",
             name: "bash",
           });
-          return Promise.resolve({ json: PLAN_WITHOUT_PLACEMENTS, text: "" });
+          return Promise.resolve({
+            json: PUBLISHER_PLAN_WITHOUT_PLACEMENTS,
+            text: "",
+          });
         },
         close: () => Promise.resolve(),
         work: (_prompt, opts) => {
@@ -333,6 +356,7 @@ describe("runWizard", () => {
     await runWizard({
       cwd: repository(),
       fetchImpl: docsFetch(),
+      mode: "publisher",
       seam,
       ui,
     });
@@ -344,39 +368,59 @@ describe("runWizard", () => {
   });
 
   it("builds the placements the developer kept and names the ones they dropped", async () => {
-    const seam = fakeSeam({ plans: [PLAN] });
-    const ui = fakeUi({ multiselect: [[HERO]], review: ["approve"] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN] });
+    const ui = fakeUi({ multiselect: [[PUBLISHER_HERO]], review: ["approve"] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
-    expect(ui.offered).toContainEqual([HERO, SIDEBAR]);
-    expect(seam.works[0]).toContain(`Build these and no others:\n- ${HERO}`);
-    expect(seam.works[0]).toContain(`Do not add them:\n- ${SIDEBAR}`);
+    expect(ui.offered).toContainEqual([PUBLISHER_HERO, PUBLISHER_SIDEBAR]);
+    expect(seam.works[0]).toContain(
+      `Build these and no others:\n- ${PUBLISHER_HERO}`
+    );
+    expect(seam.works[0]).toContain(`Do not add them:\n- ${PUBLISHER_SIDEBAR}`);
   });
 
   it("still implements when the developer keeps no placement at all", async () => {
-    const seam = fakeSeam({ plans: [PLAN] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN] });
     const ui = fakeUi({ multiselect: [[]], review: ["approve"] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.works[0]).toContain(
       "wants none of the placements you proposed"
     );
-    expect(seam.works[0]).toContain(`Do not add them:\n- ${HERO}`);
-    expect(seam.works[0]).toContain(SIDEBAR);
+    expect(seam.works[0]).toContain(`Do not add them:\n- ${PUBLISHER_HERO}`);
+    expect(seam.works[0]).toContain(PUBLISHER_SIDEBAR);
   });
 
   it("skips the picker when the plan proposes no placements", async () => {
-    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] });
     const ui = fakeUi({ review: ["approve"] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(ui.asked).not.toContain(
@@ -386,11 +430,19 @@ describe("runWizard", () => {
   });
 
   it("asks once more when the agent does not answer with a plan", async () => {
-    const seam = fakeSeam({ plans: [undefined, PLAN_WITHOUT_PLACEMENTS] });
+    const seam = fakeSeam({
+      plans: [undefined, PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+    });
     const ui = fakeUi({ review: ["approve"] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.conversations).toBe(1);
@@ -404,7 +456,13 @@ describe("runWizard", () => {
     const ui = fakeUi();
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(1);
 
     expect(seam.asks).toHaveLength(2);
@@ -418,17 +476,25 @@ describe("runWizard", () => {
 
   it("sends feedback back to the same conversation", async () => {
     const revised = {
-      ...PLAN_WITHOUT_PLACEMENTS,
+      ...PUBLISHER_PLAN_WITHOUT_PLACEMENTS,
       details: "## What I found\n\nThe client belongs in src/ads.js.",
     };
-    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS, revised] });
+    const seam = fakeSeam({
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS, revised],
+    });
     const ui = fakeUi({
       review: ["feedback", "approve"],
       text: ["Put the client in src/ads.js"],
     });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.conversations).toBe(1);
@@ -438,11 +504,17 @@ describe("runWizard", () => {
   });
 
   it("re-asks without a turn when the developer sends empty feedback", async () => {
-    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] });
     const ui = fakeUi({ review: ["feedback", "approve"], text: ["   "] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.asks).toHaveLength(1);
@@ -450,11 +522,17 @@ describe("runWizard", () => {
   });
 
   it("changes nothing when the plan is aborted", async () => {
-    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] });
     const ui = fakeUi({ review: ["abort"] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.works).toEqual([]);
@@ -469,12 +547,12 @@ describe("runWizard", () => {
           join(cwd, ".env.local"),
           "# replace this\nKEY=spk_your_key_here\n"
         ),
-      plans: [PLAN_WITHOUT_PLACEMENTS],
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
     });
     const ui = fakeUi({ review: ["approve"] });
 
     await expect(
-      runWizard({ cwd, fetchImpl: docsFetch(), seam, ui })
+      runWizard({ cwd, fetchImpl: docsFetch(), mode: "publisher", seam, ui })
     ).resolves.toBe(0);
 
     expect(ui.asked.join("\n")).not.toContain("publisher key");
@@ -491,7 +569,8 @@ describe("runWizard", () => {
     await runWizard({
       cwd: repository(),
       fetchImpl: docsFetch(),
-      seam: fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] }),
+      mode: "publisher",
+      seam: fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] }),
       ui,
     });
 
@@ -501,11 +580,17 @@ describe("runWizard", () => {
   });
 
   it("stops when the developer declines a dirty working tree", async () => {
-    const seam = fakeSeam({ plans: [PLAN] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN] });
     const ui = fakeUi({ confirm: [false] });
 
     await expect(
-      runWizard({ cwd: repository(true), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(true),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.conversations).toBe(0);
@@ -514,11 +599,17 @@ describe("runWizard", () => {
   });
 
   it("warns that a directory outside Git leaves no diff to review", async () => {
-    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] });
     const ui = fakeUi({ confirm: [true], review: ["approve"] });
 
     await expect(
-      runWizard({ cwd: plainDirectory(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: plainDirectory(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.works).toHaveLength(1);
@@ -529,12 +620,18 @@ describe("runWizard", () => {
   it("asks which agent to use when several are installed", async () => {
     const seam = fakeSeam({
       agents: [AGENT, { id: "claude", name: "Claude Code" }],
-      plans: [PLAN_WITHOUT_PLACEMENTS],
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
     });
     const ui = fakeUi({ review: ["approve"], select: ["claude"] });
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(ui.offered).toContainEqual(["Codex 1.2.3", "Claude Code"]);
@@ -548,6 +645,7 @@ describe("runWizard", () => {
       runWizard({
         cwd: repository(),
         fetchImpl: docsFetch(),
+        mode: "publisher",
         seam: fakeSeam({ agents: [] }),
         ui,
       })
@@ -562,7 +660,7 @@ describe("runWizard", () => {
   });
 
   it("stops before the first turn when the documentation cannot be fetched", async () => {
-    const seam = fakeSeam({ plans: [PLAN] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN] });
     const ui = fakeUi();
 
     await expect(
@@ -572,6 +670,7 @@ describe("runWizard", () => {
           Promise.resolve(
             new Response("nope", { status: 503 })
           )) as unknown as typeof fetch,
+        mode: "publisher",
         seam,
         ui,
       })
@@ -583,13 +682,19 @@ describe("runWizard", () => {
   });
 
   it("stops cleanly when the developer presses Ctrl-C at a prompt", async () => {
-    const seam = fakeSeam({ plans: [PLAN_WITHOUT_PLACEMENTS] });
+    const seam = fakeSeam({ plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS] });
     const ui = fakeUi();
     ui.review = () =>
       Promise.reject(new WizardCancelled("Stopped. Nothing was changed."));
 
     await expect(
-      runWizard({ cwd: repository(), fetchImpl: docsFetch(), seam, ui })
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        ui,
+      })
     ).resolves.toBe(0);
 
     expect(seam.works).toEqual([]);
@@ -604,7 +709,7 @@ describe("runWizard", () => {
         // An agent that ignores the signal and answers anyway.
         ask: () => {
           stopping.abort();
-          return Promise.resolve({ json: PLAN, text: "" });
+          return Promise.resolve({ json: PUBLISHER_PLAN, text: "" });
         },
         close: () => Promise.resolve(),
         work: () => Promise.resolve({ text: "done" }),
@@ -616,6 +721,7 @@ describe("runWizard", () => {
       runWizard({
         cwd: repository(),
         fetchImpl: docsFetch(),
+        mode: "publisher",
         seam,
         signal: stopping.signal,
         ui,
@@ -645,12 +751,14 @@ describe("runWizard", () => {
     await runWizard({
       cwd: repository(),
       fetchImpl: docsFetch(),
+      mode: "publisher",
       seam: failing,
       ui: quiet,
     });
     await runWizard({
       cwd: repository(),
       fetchImpl: docsFetch(),
+      mode: "publisher",
       seam: failing,
       ui: loud,
       verbose: true,
@@ -659,6 +767,190 @@ describe("runWizard", () => {
     expect(quiet.record.join("\n")).not.toContain("status 127");
     expect(loud.record.join("\n")).toContain(
       "caused by: Error: codex exited with status 127"
+    );
+  });
+});
+
+describe("advertiser wizard", () => {
+  const purchase = {
+    file: "src/checkout.ts",
+    name: "purchase",
+    reason: "measure completed orders",
+    trigger: "server checkout succeeds",
+  };
+  const signup = {
+    file: "src/signup.ts",
+    name: "user_signed_up",
+    reason: "measure registrations",
+    trigger: "browser registration succeeds",
+  };
+  const purchaseLabel =
+    "purchase - src/checkout.ts - server checkout succeeds - measure completed orders";
+  const signupLabel =
+    "user_signed_up - src/signup.ts - browser registration succeeds - measure registrations";
+  const plan = {
+    details:
+      "## Integration\n\nWire the existing consent and identity callbacks.",
+    events: [purchase, signup],
+    summary: "An app with checkout and registration.",
+  };
+
+  it("fetches advertiser docs, selects events and reports the advertiser env file", async () => {
+    const cwd = repository();
+    const urls: string[] = [];
+    const ui = fakeUi({ multiselect: [[purchaseLabel]], review: ["approve"] });
+    const seam = fakeSeam({
+      onWork: () => {
+        expect(ui.asked).toContain("Go ahead with this plan?");
+        writeFileSync(join(cwd, ".env.local"), "KEY=sak_your_key_here\n");
+        writeFileSync(join(cwd, ".env.publisher"), "KEY=spk_your_key_here\n");
+        writeFileSync(join(cwd, "analytics.ts"), "// advertiser client\n");
+      },
+      plans: [plan],
+    });
+
+    await expect(
+      runWizard({
+        cwd,
+        fetchImpl: docsFetch(urls),
+        mode: "advertiser",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(urls).toEqual([
+      "https://docs.specify.sh/llms.txt",
+      "https://docs.specify.sh/advertising/llms-full.txt",
+    ]);
+    expect(seam.asks[0]).toContain("add the Specify advertiser SDK");
+    expect(seam.schemas[0]?.required).toEqual(["details", "events", "summary"]);
+    expect(ui.offered).toContainEqual([purchaseLabel, signupLabel]);
+    expect(ui.finished).toContain("Review the plan: 1 event");
+    expect(seam.works[0]).toContain(
+      `Build these and no others:\n- ${purchaseLabel}`
+    );
+    expect(seam.works[0]).toContain(`Do not add them:\n- ${signupLabel}`);
+    expect(seam.works[0]).toContain("must not ask for one");
+    expect(seam.works[0]).toContain(
+      "No git commit, no git push, no pull request"
+    );
+    expect(ui.asked.join("\n")).not.toContain("advertiser key");
+    expect(ui.record.join("\n")).toContain("analytics.ts");
+    expect(ui.record.join("\n")).toContain(
+      "Replace sak_your_key_here in .env.local with a key from https://app.specify.sh/advertise/advertiser-keys"
+    );
+    expect(ui.record.join("\n")).not.toContain("Add your publisher key");
+  });
+
+  it("revises event suggestions in the same session before implementation", async () => {
+    const revised = {
+      ...plan,
+      details: "Only wire checkout.",
+      events: [purchase],
+    };
+    const seam = fakeSeam({ plans: [plan, revised] });
+    const ui = fakeUi({
+      multiselect: [[purchaseLabel]],
+      review: ["feedback", "approve"],
+      text: ["Only wire checkout."],
+    });
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "advertiser",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(seam.conversations).toBe(1);
+    expect(seam.asks[1]).toContain("Only wire checkout.");
+    expect(seam.schemas[1]?.required).toContain("events");
+    expect(ui.offered).toContainEqual([purchaseLabel]);
+    expect(seam.works[0]).toContain(revised.details);
+    expect(seam.works[0]).not.toContain(signupLabel);
+  });
+
+  it("does no implementation when the advertiser plan is aborted", async () => {
+    const seam = fakeSeam({ plans: [plan] });
+    const ui = fakeUi({ review: ["abort"] });
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "advertiser",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(seam.works).toEqual([]);
+    expect(ui.asked).not.toContain(
+      "Which of these events should the agent capture?"
+    );
+  });
+
+  it("wires the client without captures when all proposed events are dropped", async () => {
+    const seam = fakeSeam({ plans: [plan] });
+    const ui = fakeUi({ multiselect: [[]], review: ["approve"] });
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "advertiser",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(seam.works[0]).toContain("add no event captures at all");
+    expect(seam.works[0]).toContain(`Do not add them:\n- ${purchaseLabel}`);
+    expect(ui.finished).toContain("Review the plan: 0 events");
+  });
+
+  it("skips the picker when there are no suggested events", async () => {
+    const seam = fakeSeam({ plans: [{ ...plan, events: [] }] });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "advertiser",
+        seam,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(ui.asked).not.toContain(
+      "Which of these events should the agent capture?"
+    );
+    expect(seam.works).toHaveLength(1);
+    expect(ui.record.join("\n")).toContain(
+      "Replace sak_your_key_here in the env file the agent wrote"
+    );
+  });
+
+  it("uses the advertiser manual guide when no agent is installed", async () => {
+    const ui = fakeUi();
+
+    await expect(
+      runWizard({
+        cwd: repository(),
+        fetchImpl: docsFetch(),
+        mode: "advertiser",
+        seam: fakeSeam({ agents: [] }),
+        ui,
+      })
+    ).resolves.toBe(1);
+
+    expect(ui.record.join("\n")).toContain(
+      "https://docs.specify.sh/advertising/analytics-sdk-setup"
     );
   });
 });
