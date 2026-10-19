@@ -244,7 +244,7 @@ export default class Specify {
    * @param options - How to serve this placement
    * @param options.imageFormat - The image format to request
    * @param options.adUnitId - Your own id for this placement, so you can compare placements in reporting
-   * @throws {ValidationError} When an address is malformed, or more than 50 are passed here
+   * @throws {ValidationError} When an address is malformed, or more than 50 different ones are passed here. Addresses that differ only in letter case count once.
    * @returns An ad, or null for no ad, an API failure, or a network failure
    */
   serve(

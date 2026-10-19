@@ -33,7 +33,7 @@ export interface ServeOptions {
  *
  * @param options - Publisher key, wallet addresses, image format, and an optional ad unit id
  * @returns An ad, or null for no ad, an API failure, or a network failure
- * @throws {ValidationError} When the publisher key or an address is malformed, no addresses are given, or more than 50 are
+ * @throws {ValidationError} When the publisher key or an address is malformed, no addresses are given, or more than 50 different ones are. Addresses that differ only in letter case count once.
  */
 export async function serve(options: ServeOptions): Promise<SpecifyAd | null> {
   assertValidPublisherKey(options.publisherKey);

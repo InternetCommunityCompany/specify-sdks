@@ -6,7 +6,13 @@ import Specify, {
   type SpecifyInitConfig,
   ValidationError,
 } from "../src";
-import { VALID_MOCK_PUBLISHER_KEY, VALID_MOCK_WALLET_ADDRESS } from "./consts";
+import {
+  distinctWalletAddresses,
+  LOWER_CASE_WALLET_ADDRESS,
+  MIXED_CASE_WALLET_ADDRESS,
+  VALID_MOCK_PUBLISHER_KEY,
+  VALID_MOCK_WALLET_ADDRESS,
+} from "./consts";
 import { setupMockFetch } from "./helpers";
 
 const mockAd = {
@@ -102,6 +108,42 @@ describe("Specify", () => {
 
       expect(requestBody(requests[0] ?? {})).toMatchObject({
         walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+    });
+
+    it.each([
+      ["mixed case", MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
+      ["lowercase", LOWER_CASE_WALLET_ADDRESS, MIXED_CASE_WALLET_ADDRESS],
+    ])(
+      "sends a case-duplicated address once, in the %s given first",
+      async (_label, first, second) => {
+        const specify = createSpecify();
+        const { requests } = setupMockFetch(mockAd);
+
+        await specify.serve([first, second], {
+          imageFormat: ImageFormat.LANDSCAPE,
+        });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [first],
+        });
+      }
+    );
+
+    it("counts case variants as one address toward the limit", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+      const addresses = [
+        ...distinctWalletAddresses(49),
+        MIXED_CASE_WALLET_ADDRESS,
+        LOWER_CASE_WALLET_ADDRESS,
+      ];
+
+      await expect(
+        specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: addresses.slice(0, 50),
       });
     });
 

@@ -25,7 +25,17 @@ export function assertValidAddresses(addresses: Address[]): void {
 
 export function prepareWalletAddresses(addresses: Address[]): Address[] {
   assertValidAddresses(addresses);
-  const uniqueAddresses = [...new Set(addresses)];
+  // Letter case is only a checksum, so case variants are one wallet. Keeping
+  // the first casing matches what the browser client sends.
+  const seen = new Set<string>();
+  const uniqueAddresses = addresses.filter((address) => {
+    const key = address.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
   if (uniqueAddresses.length > MAX_WALLET_ADDRESSES) {
     throw new ValidationError("Maximum 50 wallet addresses allowed");
   }
