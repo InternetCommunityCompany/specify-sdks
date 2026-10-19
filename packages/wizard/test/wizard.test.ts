@@ -335,6 +335,24 @@ describe("runWizard (publisher)", () => {
     expect(ui.shown).toContain(`where ${cwd}`);
   });
 
+  it.each([
+    { cwd: HOME, where: "~" },
+    { cwd: join(HOME, "app"), where: `~${sep}app` },
+    { cwd: join(`${HOME}2`, "app"), where: join(`${HOME}2`, "app") },
+  ])("shows $cwd as $where", async ({ cwd, where }) => {
+    const ui = fakeUi();
+
+    await runWizard({
+      cwd,
+      fetchImpl: docsFetch(),
+      mode: "publisher",
+      seam: fakeSeam({ agents: [] }),
+      ui,
+    });
+
+    expect(ui.shown).toContain(`where ${where}`);
+  });
+
   it("summarizes each turn by what the agent actually did", async () => {
     const seam: AgentSeam = {
       detect: () => Promise.resolve([AGENT]),

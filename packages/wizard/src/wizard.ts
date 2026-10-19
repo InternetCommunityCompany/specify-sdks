@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { sep } from "node:path";
 import type {
   AgentActivity,
   AgentConversation,
@@ -96,7 +97,10 @@ function describeAgent(agent: DetectedAgent): string {
 /** A path the developer recognises, rather than one that eats the line. */
 function shorten(cwd: string): string {
   const home = homedir();
-  return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+  // A bare prefix check would turn /home/dev2 into ~2 for the home /home/dev.
+  const inside =
+    home !== "" && (cwd === home || cwd.startsWith(`${home}${sep}`));
+  return inside ? `~${cwd.slice(home.length)}` : cwd;
 }
 
 function contract(ui: Ui, agent: DetectedAgent): void {
