@@ -8,10 +8,16 @@ import {
 } from "../src/server";
 import {
   distinctWalletAddresses,
+  INVALID_PUBLISHER_KEY_MESSAGE,
+  INVALID_WALLET_ADDRESS_MESSAGE,
+  LONG_WALLET_ADDRESS,
   LOWER_CASE_WALLET_ADDRESS,
   MIXED_CASE_WALLET_ADDRESS,
+  SHORT_WALLET_ADDRESS,
+  UNPREFIXED_MOCK_PUBLISHER_KEY,
   VALID_MOCK_PUBLISHER_KEY,
   VALID_MOCK_WALLET_ADDRESS,
+  WALLET_ADDRESS_LIMIT_MESSAGE,
 } from "./consts";
 import { setupMockFetch } from "./helpers";
 
@@ -115,15 +121,24 @@ describe("serve", () => {
     });
   });
 
-  it("rejects a malformed publisher key before requesting", async () => {
-    const fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
+  it.each([
+    ["an unrelated string", "invalid"],
+    [
+      "a full-length key without the spk_ prefix",
+      UNPREFIXED_MOCK_PUBLISHER_KEY,
+    ],
+  ])(
+    "rejects %s as the publisher key before requesting",
+    async (_label, publisherKey) => {
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
 
-    await expect(
-      serve({ ...options(), publisherKey: "invalid" })
-    ).rejects.toThrow(ValidationError);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+      await expect(serve({ ...options(), publisherKey })).rejects.toThrow(
+        new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE)
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects a missing publisher key with ValidationError before requesting", async () => {
     const fetchMock = vi.fn();
@@ -131,7 +146,7 @@ describe("serve", () => {
 
     await expect(
       serve({ ...options(), publisherKey: undefined as unknown as string })
-    ).rejects.toThrow(ValidationError);
+    ).rejects.toThrow(new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -149,29 +164,46 @@ describe("serve", () => {
         // @ts-expect-error JavaScript callers can provide an invalid value
         walletAddresses,
       })
-    ).rejects.toThrow(ValidationError);
+    ).rejects.toThrow(
+      new ValidationError(
+        "serve() needs at least one wallet address. A server request has no identity cookie to fall back on, so there is nothing to match."
+      )
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects a malformed address before requesting", async () => {
+  it.each([
+    ["without the 0x prefix", "invalid_address" as Address],
+    ["with non-hex characters", "0xinvalid" as Address],
+    ["with 39 hex digits", SHORT_WALLET_ADDRESS],
+    ["with 41 hex digits", LONG_WALLET_ADDRESS],
+  ])("rejects an address %s before requesting", async (_label, address) => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
 
-    await expect(serve(options(["0xinvalid" as Address]))).rejects.toThrow(
-      ValidationError
+    await expect(serve(options([address]))).rejects.toThrow(
+      new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE)
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts exactly 50 distinct addresses", async () => {
+    const { requests } = setupMockFetch(mockAd);
+    const addresses = distinctWalletAddresses(50);
+
+    await expect(serve(options(addresses))).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: addresses,
+    });
   });
 
   it("rejects more than 50 unique addresses before requesting", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
-    const addresses = Array.from(
-      { length: 51 },
-      (_, index) => `0x${index.toString(16).padStart(40, "0")}` as Address
-    );
 
-    await expect(serve(options(addresses))).rejects.toThrow(ValidationError);
+    await expect(serve(options(distinctWalletAddresses(51)))).rejects.toThrow(
+      new ValidationError(WALLET_ADDRESS_LIMIT_MESSAGE)
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

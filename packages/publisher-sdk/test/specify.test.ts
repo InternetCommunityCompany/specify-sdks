@@ -8,10 +8,16 @@ import Specify, {
 } from "../src";
 import {
   distinctWalletAddresses,
+  INVALID_PUBLISHER_KEY_MESSAGE,
+  INVALID_WALLET_ADDRESS_MESSAGE,
+  LONG_WALLET_ADDRESS,
   LOWER_CASE_WALLET_ADDRESS,
   MIXED_CASE_WALLET_ADDRESS,
+  SHORT_WALLET_ADDRESS,
+  UNPREFIXED_MOCK_PUBLISHER_KEY,
   VALID_MOCK_PUBLISHER_KEY,
   VALID_MOCK_WALLET_ADDRESS,
+  WALLET_ADDRESS_LIMIT_MESSAGE,
 } from "./consts";
 import { setupMockFetch } from "./helpers";
 
@@ -52,16 +58,18 @@ describe("Specify", () => {
       ).toBeInstanceOf(Specify);
     });
 
-    it("throws ValidationError for an invalid publisher key", () => {
-      expect(() => new Specify({ publisherKey: "invalid_key" })).toThrow(
-        ValidationError
+    it.each([
+      ["an unrelated string", "invalid_key"],
+      ["a key that is too short", "spk_short"],
+      ["a key that is too long", `spk_${"a".repeat(31)}`],
+      [
+        "a full-length key without the spk_ prefix",
+        UNPREFIXED_MOCK_PUBLISHER_KEY,
+      ],
+    ])("throws ValidationError for %s", (_label, publisherKey) => {
+      expect(() => new Specify({ publisherKey })).toThrow(
+        new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE)
       );
-      expect(() => new Specify({ publisherKey: "spk_short" })).toThrow(
-        ValidationError
-      );
-      expect(
-        () => new Specify({ publisherKey: `spk_${"a".repeat(31)}` })
-      ).toThrow(ValidationError);
     });
 
     it.each([undefined, null, 1])(
@@ -69,7 +77,7 @@ describe("Specify", () => {
       (publisherKey) => {
         expect(
           () => new Specify({ publisherKey } as unknown as SpecifyInitConfig)
-        ).toThrow(ValidationError);
+        ).toThrow(new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE));
       }
     );
   });
@@ -191,20 +199,24 @@ describe("Specify", () => {
       ).resolves.toEqual(mockAd);
     });
 
-    it("throws ValidationError for an invalid wallet address", async () => {
-      const specify = createSpecify();
+    it.each([
+      ["without the 0x prefix", "invalid_address" as Address],
+      ["with non-hex characters", "0xinvalid" as Address],
+      ["with 39 hex digits", SHORT_WALLET_ADDRESS],
+      ["with 41 hex digits", LONG_WALLET_ADDRESS],
+    ])(
+      "throws ValidationError for an address %s before requesting",
+      async (_label, address) => {
+        const specify = createSpecify();
+        const fetchMock = vi.fn();
+        globalThis.fetch = fetchMock;
 
-      await expect(
-        specify.serve("invalid_address" as Address, {
-          imageFormat: ImageFormat.LANDSCAPE,
-        })
-      ).rejects.toThrow(ValidationError);
-      await expect(
-        specify.serve("0xinvalid" as Address, {
-          imageFormat: ImageFormat.LANDSCAPE,
-        })
-      ).rejects.toThrow(ValidationError);
-    });
+        await expect(
+          specify.serve(address, { imageFormat: ImageFormat.LANDSCAPE })
+        ).rejects.toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
 
     it("returns null without a request for an empty address array without consent", async () => {
       const specify = createSpecify();
@@ -217,16 +229,30 @@ describe("Specify", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("throws ValidationError for more than 50 unique addresses", async () => {
+    it("accepts exactly 50 distinct addresses", async () => {
       const specify = createSpecify();
-      const manyAddresses = Array.from(
-        { length: 51 },
-        (_, index) => `0x${index.toString().padStart(40, "0")}` as Address
-      );
+      const { requests } = setupMockFetch(mockAd);
+      const addresses = distinctWalletAddresses(50);
 
       await expect(
-        specify.serve(manyAddresses, { imageFormat: ImageFormat.LANDSCAPE })
-      ).rejects.toThrow(ValidationError);
+        specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: addresses,
+      });
+    });
+
+    it("throws ValidationError for more than 50 unique addresses before requesting", async () => {
+      const specify = createSpecify();
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+
+      await expect(
+        specify.serve(distinctWalletAddresses(51), {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
+      ).rejects.toThrow(new ValidationError(WALLET_ADDRESS_LIMIT_MESSAGE));
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it.each([400, 401, 404, 500, 502, 503])(
@@ -451,7 +477,11 @@ describe("Specify", () => {
       await expect(
         // @ts-expect-error JavaScript callers can omit every argument
         specify.serve()
-      ).rejects.toThrow(ValidationError);
+      ).rejects.toThrow(
+        new ValidationError(
+          "serve() needs an options object with an imageFormat; pass serve({ imageFormat }) or serve(addresses, { imageFormat })"
+        )
+      );
     });
   });
 
@@ -535,7 +565,7 @@ describe("Specify", () => {
             VALID_MOCK_WALLET_ADDRESS,
             "not-an-address" as Address,
           ])
-        ).toThrow(ValidationError);
+        ).toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
         await expect(
           specify.serve({ imageFormat: ImageFormat.LANDSCAPE })
         ).resolves.toBeNull();
@@ -721,7 +751,7 @@ describe("Specify", () => {
             VALID_MOCK_WALLET_ADDRESS,
             "not-an-address" as Address,
           ])
-        ).toThrow(ValidationError);
+        ).toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
         await Promise.resolve();
 
         expect(listener).not.toHaveBeenCalled();
