@@ -89,6 +89,16 @@ describe("serve", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a missing publisher key with ValidationError before requesting", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    await expect(
+      serve({ ...options(), publisherKey: undefined as unknown as string })
+    ).rejects.toThrow(ValidationError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["an empty array", []],
     ["a missing value", undefined],
