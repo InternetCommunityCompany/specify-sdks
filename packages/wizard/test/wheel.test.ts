@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render } from "ink-testing-library";
+import { createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { App } from "../src/ui/app";
+import { WizardStore } from "../src/ui/store";
 import { MOUSE_OFF, MOUSE_ON, wheelTurns } from "../src/ui/wheel";
+
+afterEach(cleanup);
 
 const ESC = "\u001B";
 const wheelUp = `${ESC}[<64;10;5M`;
@@ -40,9 +46,29 @@ describe("wheelTurns", () => {
   });
 });
 
-describe("mouse mode sequences", () => {
-  it("turns SGR button reporting on and back off, in reverse order", () => {
-    expect(MOUSE_ON).toBe(`${ESC}[?1000h${ESC}[?1006h`);
-    expect(MOUSE_OFF).toBe(`${ESC}[?1006l${ESC}[?1000l`);
+describe("mouse reporting", () => {
+  it("is on while the plan is under review, and off once it is answered", async () => {
+    const store = new WizardStore();
+    const view = render(createElement(App, { mode: "publisher", store }));
+    const decision = store.request<string>({
+      kind: "review",
+      message: "Go ahead with this plan?",
+      options: [{ label: "Approve, make these changes", value: "approve" }],
+      plan: {
+        details: "## What I found\n\nA Next.js app.",
+        suggestions: [],
+        summary: "A Next.js app.",
+      },
+    });
+    await vi.waitFor(() => expect(view.frames).toContain(MOUSE_ON));
+    expect(view.frames).not.toContain(MOUSE_OFF);
+
+    view.stdin.write("\r");
+
+    await expect(decision).resolves.toBe("approve");
+    await vi.waitFor(() => expect(view.frames).toContain(MOUSE_OFF));
+    expect(view.frames.indexOf(MOUSE_OFF)).toBeGreaterThan(
+      view.frames.indexOf(MOUSE_ON)
+    );
   });
 });
