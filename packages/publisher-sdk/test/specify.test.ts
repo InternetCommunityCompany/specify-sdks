@@ -97,6 +97,36 @@ describe("Specify", () => {
       ).resolves.toEqual(mockAd);
     });
 
+    it("sends the configured publisher key", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+
+      await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
+
+      expect(new Headers(requests[0]?.headers).get("x-api-key")).toBe(
+        VALID_MOCK_PUBLISHER_KEY
+      );
+    });
+
+    it("sends the placement and addresses on the wire", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+
+      await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        adUnitId: "header",
+        imageFormat: ImageFormat.LONG_BANNER,
+      });
+
+      expect(requestBody(requests[0] ?? {})).toEqual({
+        adUnitId: "header",
+        cookieConsent: false,
+        imageFormat: ImageFormat.LONG_BANNER,
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+    });
+
     it("deduplicates addresses before sending them", async () => {
       const specify = createSpecify();
       const { requests } = setupMockFetch(mockAd);
