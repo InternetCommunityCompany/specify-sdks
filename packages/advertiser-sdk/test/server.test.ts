@@ -6,7 +6,7 @@ const KEY = "sak_0123456789abcdef0123456789abcd";
 const WALLET = "0x1111111111111111111111111111111111111111";
 const OPTIONS: CaptureOptions = {
   advertiserKey: KEY,
-  event: "loan_confirmed",
+  event: "purchase",
   identity: "customer_123",
 };
 
@@ -25,7 +25,7 @@ describe("advertiser server capture", () => {
   it("sends one event with its identity and no cookie", async () => {
     const fetchSpy = mockService();
     await expect(
-      capture({ ...OPTIONS, url: "https://shop.example/loans/1" })
+      capture({ ...OPTIONS, url: "https://shop.example/orders/1" })
     ).resolves.toBeUndefined();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
@@ -41,8 +41,8 @@ describe("advertiser server capture", () => {
       events: [
         {
           id: expect.any(String),
-          name: "loan_confirmed",
-          url: "https://shop.example/loans/1",
+          name: "purchase",
+          url: "https://shop.example/orders/1",
         },
       ],
       identity: "customer_123",
@@ -61,12 +61,10 @@ describe("advertiser server capture", () => {
 
   it("sends a dedupe key in place of a generated event ID", async () => {
     const fetchSpy = mockService();
-    await capture({ ...OPTIONS, dedupeKey: "loan_1" });
+    await capture({ ...OPTIONS, dedupeKey: "order_1" });
 
     const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
-    expect(body.events).toEqual([
-      { dedupeKey: "loan_1", name: "loan_confirmed" },
-    ]);
+    expect(body.events).toEqual([{ dedupeKey: "order_1", name: "purchase" }]);
   });
 
   it.each([
