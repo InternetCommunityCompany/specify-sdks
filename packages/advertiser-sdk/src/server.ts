@@ -16,13 +16,13 @@ export const ValidationError: typeof CoreValidationError = CoreValidationError;
 export interface CaptureOptions {
   /** Your advertiser key, which starts with sak_ */
   advertiserKey: string;
-  /** Your own ID for this event, such as an order ID. Events with the same name and key count once; without a key, every call counts */
+  /** Your own ID for this event, such as an order ID, so a repeat with the same event name counts once */
   dedupeKey?: string;
   /** The event name, such as "purchase" */
   event: string;
-  /** Your user ID for the visitor, the same one your site passes to identify() in the browser, or a wallet address */
+  /** The user ID your site passes to identify() in the browser, or a wallet address */
   identity: string;
-  /** The absolute URL where the event happened, when there is one */
+  /** The page where the event happened, if there is one, as an absolute URL */
   url?: string;
 }
 
@@ -73,16 +73,14 @@ function validate(options: CaptureOptions): void {
 }
 
 /**
- * Records an event from a server
+ * Records an event from your server
  *
- * A user ID only counts toward attribution once your site has passed the same
- * ID to identify() in the browser. A wallet address counts on its own. The
- * promise resolves once the event is delivered or retries run out, which can
- * take up to about 18 seconds when Specify is unreachable; a failure on
- * Specify's side never rejects it.
+ * Use it for conversions your backend confirms, such as a completed payment.
+ * Await it in serverless functions: it settles within about 18 seconds, and
+ * it only rejects for invalid options, never because Specify is unreachable.
  *
  * @param options - Advertiser key, event name, identity, and optionally a URL and a dedupe key
- * @throws {ValidationError} When the key, event name, identity, URL, or dedupe key is invalid
+ * @throws {ValidationError} When an option is invalid
  */
 export async function capture(options: CaptureOptions): Promise<void> {
   validate(options);

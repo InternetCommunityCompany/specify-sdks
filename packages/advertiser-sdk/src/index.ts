@@ -79,11 +79,10 @@ export default class Specify {
   private flushing: Promise<void> | null = null;
 
   /**
-   * Creates a Specify client
+   * Creates the Specify client
    *
-   * Create it once, as early as possible on every page, so it sees the ad
-   * click that brought the visitor. Nothing is sent until setCookieConsent()
-   * is first called. A malformed key turns every method into a no-op.
+   * Create one client and import it wherever you need it. Load it on every
+   * page of your site, including the pages your ads link to.
    *
    * @param config - Client configuration
    * @param config.advertiserKey - Your advertiser key, which starts with sak_
@@ -102,12 +101,10 @@ export default class Specify {
   }
 
   /**
-   * Tells Specify whether the visitor consented to being identified
+   * Passes on the visitor's consent for advertising
    *
-   * Pass your consent manager's answer for advertising or marketing, once it
-   * knows it, on every page load and whenever it changes. Until the first
-   * call, events and identification wait in memory. After a refusal they are
-   * still sent, without Specify's cookie.
+   * Call it on every page load once your consent manager knows the answer,
+   * and again whenever it changes. Nothing is sent until the first call.
    *
    * @param granted - Whether the visitor consented
    */
@@ -130,16 +127,14 @@ export default class Specify {
   }
 
   /**
-   * Identifies the visitor by your user ID or their wallet addresses
+   * Identifies the visitor
    *
-   * Call it after sign-in, when a wallet connects, and on each page load for a
-   * signed-in visitor. Your server's capture() calls only count for a user ID
-   * your site has passed here. A new user ID replaces the previous one;
-   * wallets add up, and the 50 most recent are kept. A string starting with
-   * 0x is treated as a wallet. A user ID can't be blank, contain @, or be
-   * longer than 256 bytes; invalid input is ignored.
+   * Call it when the visitor signs in or connects a wallet, and on every page
+   * load while they're signed in. Use the same user ID your server passes to
+   * capture(). Use your own ID, not an email address: IDs containing @ are
+   * ignored.
    *
-   * @param walletOrUserId - Your user ID, a wallet address, or an array of wallet addresses
+   * @param walletOrUserId - Your user ID for the visitor, a wallet address, or an array of wallet addresses
    */
   identify(walletOrUserId: string | Address[]): void {
     contained(() => {
@@ -154,9 +149,7 @@ export default class Specify {
   }
 
   /**
-   * Forgets the identified user ID, wallets and ad click, such as on sign-out
-   *
-   * Events already captured keep the identity they were captured with.
+   * Forgets the visitor, such as when they sign out
    */
   reset(): void {
     this.userId = undefined;
@@ -166,12 +159,11 @@ export default class Specify {
   }
 
   /**
-   * Records an event, such as a purchase or a sign-up
+   * Records an event, such as a sign-up
    *
-   * The event keeps the identity and page URL from the moment it was captured.
-   * Before setCookieConsent() is first called, it waits in memory.
+   * Call it once the action has succeeded.
    *
-   * @param event - The event name, such as "purchase"
+   * @param event - The event name, such as "signup"
    */
   capture(event: string): void {
     contained(() => {
