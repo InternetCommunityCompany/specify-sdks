@@ -110,7 +110,7 @@ describe("advertiser server requests in Node and DOM", () => {
         credentials: "omit",
         headers: { "Content-Type": "application/json", "x-api-key": "key" },
         method: "POST",
-        url: "http://localhost:3000/v1/identify",
+        url: "https://spfsrv.com/v1/identify",
       },
       {
         body: {
@@ -121,14 +121,14 @@ describe("advertiser server requests in Node and DOM", () => {
         credentials: "omit",
         headers: { "Content-Type": "application/json", "x-api-key": "key" },
         method: "POST",
-        url: "http://localhost:3000/v1/events",
+        url: "https://spfsrv.com/v1/events",
       },
       {
         body: { identity: wallet, source: "server" },
         credentials: "omit",
         headers: { "Content-Type": "application/json", "x-api-key": "key" },
         method: "POST",
-        url: "http://localhost:3000/v1/identify",
+        url: "https://spfsrv.com/v1/identify",
       },
     ]);
   });
@@ -252,7 +252,7 @@ describe("advertiser server requests in Node and DOM", () => {
       },
     ]);
     for (const [url, request] of fetchSpy.mock.calls) {
-      expect(url).toBe("http://localhost:3000/v1/events");
+      expect(url).toBe("https://spfsrv.com/v1/events");
       expect(request?.credentials).toBe("omit");
       expect(request?.headers).toEqual({
         "Content-Type": "application/json",

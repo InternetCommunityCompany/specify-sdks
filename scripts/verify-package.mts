@@ -441,7 +441,7 @@ if (serverRequest.credentials !== "omit") process.exit(1);
 const serverBody = JSON.parse(serverRequest.body);
 if (!sameKeys(serverBody, ["events", "identity", "source"]) || serverBody.source !== "server" || serverBody.identity !== " Customer " || !sameKeys(serverBody.events[0], ["name"]) || serverBody.events[0].name !== "purchase") process.exit(1);
 if (await serverClient.identify(" Customer ") !== 204) process.exit(1);
-if (serverUrl !== "http://localhost:3000/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
+if (serverUrl !== "https://spfsrv.com/v1/identify" || serverRequest.credentials !== "omit") process.exit(1);
 const identificationBody = JSON.parse(serverRequest.body);
 if (!sameKeys(identificationBody, ["identity", "source"]) || identificationBody.source !== "server" || identificationBody.identity !== " Customer ") process.exit(1);
 if (await serverClient.capture("missing_identity") !== null || advertiserRequests !== 2) process.exit(1);

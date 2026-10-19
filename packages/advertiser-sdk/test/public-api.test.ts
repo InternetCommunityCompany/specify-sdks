@@ -107,8 +107,8 @@ describe.runIf(typeof window !== "undefined")(
       client.setCookieConsent(true);
       await client.capture("purchase");
       expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
-        "http://localhost:3000/v1/identify",
-        "http://localhost:3000/v1/events",
+        "https://spfsrv.com/v1/identify",
+        "https://spfsrv.com/v1/events",
       ]);
       const [identity, event] = bodies(fetchSpy);
       expect(identity).toEqual({
@@ -255,9 +255,9 @@ describe.runIf(typeof window !== "undefined")(
       client.setCookieConsent(true);
       await expect(client.capture("after_reset")).resolves.toBe(200);
       expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
-        "http://localhost:3000/v1/identify",
-        "http://localhost:3000/v1/events",
-        "http://localhost:3000/v1/events",
+        "https://spfsrv.com/v1/identify",
+        "https://spfsrv.com/v1/events",
+        "https://spfsrv.com/v1/events",
       ]);
       expect(bodies(fetchSpy)[1]).toMatchObject({
         events: [{ name: "before_reset" }],
