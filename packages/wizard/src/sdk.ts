@@ -2,8 +2,8 @@ export type SdkMode = "publisher" | "advertiser";
 
 export const SDK_CONFIG = {
   advertiser: {
-    example: "https://docs.specify.sh/advertising/analytics-sdk-setup.md",
-    guide: "https://docs.specify.sh/advertising/analytics-sdk-setup",
+    example: "https://docs.specify.sh/advertising/javascript.md",
+    guide: "https://docs.specify.sh/advertising/javascript",
     keysUrl: "https://app.specify.sh/advertise/advertiser-keys",
     placeholderKey: "sak_your_key_here",
     section: "advertising",

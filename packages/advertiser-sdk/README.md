@@ -31,9 +31,9 @@ await capture({
 });
 ```
 
-**[Get started →](https://docs.specify.sh/advertising/analytics-sdk-setup)**
+**[Get started →](https://docs.specify.sh/advertising/track-conversions)**
 
-- [Browser SDK reference](https://docs.specify.sh/advertising/analytics-sdk)
-- [Node.js SDK reference](https://docs.specify.sh/advertising/analytics-sdk-nodejs)
+- [Browser SDK reference](https://docs.specify.sh/advertising/sdk-browser)
+- [Server events](https://docs.specify.sh/advertising/server)
 
 MIT © The Internet Community Company

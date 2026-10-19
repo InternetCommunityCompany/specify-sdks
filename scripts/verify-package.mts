@@ -264,7 +264,7 @@ try {
   for (const args of [[], ["--publisher"], ["--advertiser"]]) {
     const advertiserMode = args.includes("--advertiser");
     const guide = advertiserMode
-      ? "https://docs.specify.sh/advertising/analytics-sdk-setup"
+      ? "https://docs.specify.sh/advertising/javascript"
       : "https://docs.specify.sh/publishing/get-started";
     try {
       execFileSync(
