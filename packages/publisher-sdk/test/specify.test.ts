@@ -195,7 +195,7 @@ describe("Specify", () => {
 
     it("applies the address limit after deduplication", async () => {
       const specify = createSpecify();
-      setupMockFetch(mockAd);
+      const { requests } = setupMockFetch(mockAd);
 
       await expect(
         specify.serve(
@@ -205,6 +205,9 @@ describe("Specify", () => {
           }
         )
       ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
     });
 
     it.each([
@@ -421,23 +424,6 @@ describe("Specify", () => {
           adUnitId: "header",
         });
       });
-
-      it.each([undefined, null])(
-        "treats %s as no addresses like today",
-        async (empty) => {
-          const specify = createSpecify();
-          const { fetch, requests } = setupMockFetch(undefined, 204);
-
-          specify.setCookieConsent(true);
-          await expect(
-            specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
-          ).resolves.toBeNull();
-          expect(fetch).toHaveBeenCalledOnce();
-          expect(requestBody(requests[0] ?? {})).toMatchObject({
-            walletAddresses: [],
-          });
-        }
-      );
     });
 
     it("returns null without a request without consent and identified addresses", async () => {
@@ -467,17 +453,16 @@ describe("Specify", () => {
       );
     });
 
-    it.each([undefined, null])(
-      "treats %s as no addresses like today",
-      async (empty) => {
-        const specify = createSpecify();
-        setupMockFetch(mockAd);
+    it.each([undefined, null])("treats %s as no addresses", async (empty) => {
+      const specify = createSpecify();
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
 
-        await expect(
-          specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
-        ).resolves.toBeNull();
-      }
-    );
+      await expect(
+        specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
 
     it("throws ValidationError when called with no arguments at all", async () => {
       const specify = createSpecify();
@@ -1011,24 +996,26 @@ describe("Specify", () => {
         expect(specify.hasCookieConsent()).toBe(true);
       });
 
-      it("issues a request with consent and no addresses", async () => {
-        const specify = createSpecify();
-        const { fetch, requests } = setupMockFetch(undefined, 204);
+      it.each([[], undefined, null])(
+        "issues a request with consent and %s as the addresses",
+        async (empty) => {
+          const specify = createSpecify();
+          const { fetch, requests } = setupMockFetch(undefined, 204);
 
-        specify.setCookieConsent(true);
-        await expect(
-          specify.serve([], { imageFormat: ImageFormat.NO_IMAGE })
-        ).resolves.toBeNull();
-        expect(fetch).toHaveBeenCalledOnce();
-        expect(requestBody(requests[0] ?? {})).toMatchObject({
-          cookieConsent: true,
-          walletAddresses: [],
-        });
-      });
+          specify.setCookieConsent(true);
+          await expect(
+            specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
+          ).resolves.toBeNull();
+          expect(fetch).toHaveBeenCalledOnce();
+          expect(requestBody(requests[0] ?? {})).toMatchObject({
+            cookieConsent: true,
+            walletAddresses: [],
+          });
+        }
+      );
 
       it("withdraws consent granted through the setter", async () => {
         const specify = createSpecify();
-        setupMockFetch(mockAd);
         const fetchMock = vi.fn();
         globalThis.fetch = fetchMock;
 
