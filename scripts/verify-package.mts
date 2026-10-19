@@ -177,6 +177,43 @@ try {
     `Verified publisher dependency on @specify-sh/core@${coreDependency}`
   );
 
+  const advertiserCore = advertiser.manifest.dependencies?.["@specify-sh/core"];
+  if (advertiserCore !== core.manifest.version) {
+    throw new Error(
+      `Advertiser must depend on the packed core version, found ${advertiserCore ?? "nothing"}`
+    );
+  }
+  if (
+    advertiser.manifest.devDependencies?.["@specify-sh/core"] ||
+    advertiser.manifest.peerDependencies?.["@specify-sh/core"] ||
+    advertiser.manifest.optionalDependencies?.["@specify-sh/core"] ||
+    advertiser.manifest.scripts?.prepack ||
+    advertiser.manifest.scripts?.postpack
+  ) {
+    throw new Error(
+      "Advertiser must declare core only in dependencies and must not use pack scripts"
+    );
+  }
+  for (const file of ["index.js", "server.js", "index.d.ts", "server.d.ts"]) {
+    const path = join(advertiser.directory, "dist", file);
+    if (!readFileSync(path, "utf8").includes("@specify-sh/core")) {
+      throw new Error(
+        `Advertiser ${file} must retain its @specify-sh/core import`
+      );
+    }
+  }
+  if (
+    readFileSync(
+      join(advertiser.directory, "dist", "react-server.js"),
+      "utf8"
+    ).includes("@specify-sh/core")
+  ) {
+    throw new Error("The advertiser react-server guard must not import core");
+  }
+  console.log(
+    `Verified advertiser dependency on @specify-sh/core@${advertiserCore}`
+  );
+
   for (const file of ["index.js", "server.js", "index.d.ts", "server.d.ts"]) {
     const path = join(publisher.directory, "dist", file);
     if (!readFileSync(path, "utf8").includes("@specify-sh/core")) {
@@ -457,6 +494,80 @@ void WalletAdSlot;
     { cwd: consumerDirectory, stdio: "inherit" }
   );
   console.log("Type-checked direct core, browser, and server imports");
+
+  writeFileSync(
+    join(consumerDirectory, "nodenext.ts"),
+    `import Advertiser from "@specify-sh/advertiser-sdk";
+import {
+  type CaptureOptions,
+  capture,
+  ValidationError as AdvertiserValidationError,
+} from "@specify-sh/advertiser-sdk/server";
+import Publisher, {
+  ImageFormat,
+  type SpecifyAd,
+  ValidationError as PublisherValidationError,
+} from "@specify-sh/publisher-sdk";
+import { serve } from "@specify-sh/publisher-sdk/server";
+
+type IsAny<T> = 0 extends 1 & T ? true : false;
+const typed: [
+  IsAny<Advertiser>,
+  IsAny<CaptureOptions>,
+  IsAny<ReturnType<typeof capture>>,
+  IsAny<AdvertiserValidationError>,
+  IsAny<Publisher>,
+  IsAny<SpecifyAd>,
+  IsAny<typeof ImageFormat>,
+  IsAny<PublisherValidationError>,
+  IsAny<ReturnType<typeof serve>>,
+] = [false, false, false, false, false, false, false, false, false];
+void typed;
+`
+  );
+  writeFileSync(
+    join(consumerDirectory, "server-only.ts"),
+    `import { capture } from "@specify-sh/advertiser-sdk/server";
+import { serve } from "@specify-sh/publisher-sdk/server";
+
+void capture;
+void serve;
+`
+  );
+  for (const [name, compilerOptions, file] of [
+    [
+      "NodeNext",
+      {
+        lib: ["ES2022", "DOM"],
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+      },
+      "nodenext.ts",
+    ],
+    [
+      "server entries without the DOM library",
+      { lib: ["ES2022"], module: "NodeNext", moduleResolution: "NodeNext" },
+      "server-only.ts",
+    ],
+  ] as const) {
+    const project = join(consumerDirectory, `tsconfig.${file}.json`);
+    writeFileSync(
+      project,
+      JSON.stringify({
+        compilerOptions: { ...compilerOptions, strict: true, types: [] },
+        files: [file],
+      })
+    );
+    execFileSync(
+      resolve("node_modules/.bin/tsc"),
+      ["--noEmit", "-p", project],
+      {
+        cwd: consumerDirectory,
+        stdio: "inherit",
+      }
+    );
+    console.log(`Type-checked the packed packages under ${name}`);
+  }
 
   execFileSync(
     "node",

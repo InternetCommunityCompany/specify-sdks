@@ -5,7 +5,7 @@ const SERVE_URL = "https://spfsrv.com/v1/ads";
 export interface AdRequest {
   adUnitId?: string;
   cookieConsent?: boolean;
-  credentials?: RequestCredentials;
+  credentials?: "include" | "omit" | "same-origin";
   imageFormat: ImageFormat;
   publisherKey: string;
   walletAddresses: Address[];
