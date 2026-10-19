@@ -1099,4 +1099,36 @@ describe("Specify", () => {
       });
     });
   });
+
+  describe.runIf(typeof window !== "undefined")("separate instances", () => {
+    it("keeps one instance's identity and consent out of another", async () => {
+      const first = createSpecify();
+      const second = createSpecify();
+      const secondListener = vi.fn();
+      second.onIdentityChange(secondListener);
+      const { requests } = setupMockFetch(mockAd);
+      const firstAddress = `0x${"ab".repeat(20)}` as Address;
+
+      first.identify(firstAddress);
+      first.setCookieConsent(true);
+      await first.serve({ imageFormat: ImageFormat.LANDSCAPE });
+      await second.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
+      await nextMacrotask();
+
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        cookieConsent: true,
+        walletAddresses: [firstAddress],
+      });
+      expect(requests[1]?.credentials).toBe("omit");
+      expect(requestBody(requests[1] ?? {})).toEqual({
+        cookieConsent: false,
+        imageFormat: ImageFormat.LANDSCAPE,
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+      expect(second.hasCookieConsent()).toBe(false);
+      expect(secondListener).not.toHaveBeenCalled();
+    });
+  });
 });
