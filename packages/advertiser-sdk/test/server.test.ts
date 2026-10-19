@@ -59,6 +59,13 @@ describe("advertiser server capture", () => {
     expect(Object.keys(body.events[0]).sort()).toEqual(["id", "name"]);
   });
 
+  it("sends to the API URL it was given", async () => {
+    const fetchSpy = mockService();
+    await capture({ ...OPTIONS, apiUrl: "https://edge.test/" });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://edge.test/v1/events");
+  });
+
   it("sends a dedupe key in place of a generated event ID", async () => {
     const fetchSpy = mockService();
     await capture({ ...OPTIONS, dedupeKey: "order_1" });
@@ -87,6 +94,11 @@ describe("advertiser server capture", () => {
     ["a user ID over 256 bytes", { ...OPTIONS, identity: "é".repeat(129) }],
     ["a malformed wallet", { ...OPTIONS, identity: "0xbroken" }],
     ["a relative URL", { ...OPTIONS, url: "/checkout" }],
+    ["an http API URL", { ...OPTIONS, apiUrl: "http://edge.test" }],
+    [
+      "an API URL with a query string",
+      { ...OPTIONS, apiUrl: "https://edge.test/?bypass=1" },
+    ],
     [
       "an event over 16 KiB",
       { ...OPTIONS, url: `https://shop.example/${"x".repeat(17_000)}` },

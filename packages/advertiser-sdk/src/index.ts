@@ -10,7 +10,12 @@ import {
   MAX_BODY_BYTES,
   send,
 } from "./request.js";
-import { ADVERTISER_KEY_PATTERN, isUserId, isWallet } from "./validation.js";
+import {
+  ADVERTISER_KEY_PATTERN,
+  apiBase,
+  isUserId,
+  isWallet,
+} from "./validation.js";
 
 const MAX_BATCH_EVENTS = 50;
 const MAX_CLICK_TOKEN_LENGTH = 1024;
@@ -20,6 +25,8 @@ export type Address = CoreAddress;
 export interface SpecifyInitConfig {
   /** Your advertiser key, which starts with sak_ */
   advertiserKey: string;
+  /** Leave unset unless Specify gives you another API URL */
+  apiUrl?: string;
 }
 
 interface Snapshot {
@@ -72,6 +79,7 @@ function contained(run: () => void): boolean {
  */
 export default class Specify {
   private readonly advertiserKey: string;
+  private readonly apiUrl: string;
   private consent: Consent = "pending";
   private userId: string | undefined;
   private readonly wallets = new Set<Address>();
@@ -88,12 +96,16 @@ export default class Specify {
    *
    * @param config - Client configuration
    * @param config.advertiserKey - Your advertiser key, which starts with sak_
+   * @param config.apiUrl - Leave unset unless Specify gives you another API URL
    */
   constructor(config: SpecifyInitConfig) {
-    const key = (config as Partial<SpecifyInitConfig> | undefined)
-      ?.advertiserKey;
+    const { advertiserKey: key, apiUrl } =
+      (config as Partial<SpecifyInitConfig> | undefined) ?? {};
     const trimmed = typeof key === "string" ? key.trim() : "";
-    this.advertiserKey = ADVERTISER_KEY_PATTERN.test(trimmed) ? trimmed : "";
+    const api = apiBase(apiUrl);
+    this.advertiserKey =
+      ADVERTISER_KEY_PATTERN.test(trimmed) && api !== undefined ? trimmed : "";
+    this.apiUrl = api ?? "";
     contained(() => {
       const url = pageUrl();
       if (url !== undefined) {
@@ -260,7 +272,7 @@ export default class Specify {
       return;
     }
     this.lastIdentify = key;
-    send(this.advertiserKey, "identify", () => this.attempt(identity));
+    send(this.destination("identify"), () => this.attempt(identity));
   }
 
   private sendEvents(
@@ -272,9 +284,17 @@ export default class Specify {
     ) {
       return Promise.resolve();
     }
-    return send(this.advertiserKey, "events", () =>
+    return send(this.destination("events"), () =>
       this.attempt({ ...identity, events })
     );
+  }
+
+  private destination(operation: "events" | "identify") {
+    return {
+      advertiserKey: this.advertiserKey,
+      apiUrl: this.apiUrl,
+      operation,
+    };
   }
 
   private hold(event: CapturedEvent): void {

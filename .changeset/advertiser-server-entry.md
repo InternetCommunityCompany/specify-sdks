@@ -6,4 +6,6 @@ Server events move to `@specify-sh/advertiser-sdk/server`: call `capture({ adver
 
 In the browser, methods return nothing and never throw, `reset()` replaces `identify(null)`, and `capture(event)` no longer takes an identity. Consent now decides only whether Specify's cookie is used: identified visitors and visitors arriving from an ad are recorded before they answer your consent banner and after they decline. Events from anyone else wait for the answer and are dropped on a refusal. Invalid user IDs and a malformed advertiser key are ignored.
 
+The client and the server `capture()` take an optional `apiUrl`; leave it unset unless Specify gives you another API URL.
+
 Failed requests are retried. Importing the browser client from a React Server Component fails the build with a pointer to the server entry.

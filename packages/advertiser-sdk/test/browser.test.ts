@@ -386,6 +386,47 @@ describe("advertiser browser client", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("sends to the API URL it was given", async () => {
+    const fetchSpy = mockService();
+    new Specify({
+      advertiserKey: KEY,
+      apiUrl: "https://edge.test/specify/",
+    }).identify("customer");
+    new Specify({
+      advertiserKey: KEY,
+      apiUrl: "http://localhost:3000",
+    }).identify("customer");
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(requests(fetchSpy).map((request) => request.url)).toEqual([
+      "https://edge.test/specify/v1/identify",
+      "http://localhost:3000/v1/identify",
+    ]);
+  });
+
+  it("does nothing with an API URL it can't use", async () => {
+    const fetchSpy = mockService();
+    for (const apiUrl of [
+      "/specify",
+      "http://edge.test",
+      "https://edge.test/?bypass=1",
+      "https://edge.test/#specify",
+      "https://user:secret@edge.test",
+      "ftp://edge.test",
+      1,
+    ]) {
+      const client = new Specify({
+        advertiserKey: KEY,
+        apiUrl,
+      } as unknown as SpecifyInitConfig);
+      client.identify("customer");
+      client.capture("purchase");
+      client.setCookieConsent(true);
+    }
+    await settle();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("does nothing on a page without a location", async () => {
     vi.stubGlobal("window", {});
     const fetchSpy = mockService();

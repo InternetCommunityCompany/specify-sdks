@@ -1,4 +1,3 @@
-const EDGE_SERVER_URL = "https://spfsrv.com/v1";
 const ATTEMPT_TIMEOUT_MS = 5000;
 const RETRY_DELAYS_MS = [1000, 2000];
 
@@ -26,15 +25,20 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+interface Destination {
+  advertiserKey: string;
+  apiUrl: string;
+  operation: "events" | "identify";
+}
+
 async function attempt(
-  advertiserKey: string,
-  operation: "events" | "identify",
+  { advertiserKey, apiUrl, operation }: Destination,
   { body, credentials, keepalive }: Attempt
 ): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
   try {
-    const response = await fetch(`${EDGE_SERVER_URL}/${operation}`, {
+    const response = await fetch(`${apiUrl}/v1/${operation}`, {
       body: JSON.stringify(body),
       ...(credentials === undefined ? {} : { credentials }),
       headers: {
@@ -54,12 +58,11 @@ async function attempt(
 }
 
 async function sendWithRetries(
-  advertiserKey: string,
-  operation: "events" | "identify",
+  destination: Destination,
   prepare: () => Attempt,
   delays: number[]
 ): Promise<void> {
-  if (await attempt(advertiserKey, operation, prepare())) {
+  if (await attempt(destination, prepare())) {
     return;
   }
   const [delay, ...remaining] = delays;
@@ -67,13 +70,12 @@ async function sendWithRetries(
     return;
   }
   await wait(delay);
-  await sendWithRetries(advertiserKey, operation, prepare, remaining);
+  await sendWithRetries(destination, prepare, remaining);
 }
 
 export function send(
-  advertiserKey: string,
-  operation: "events" | "identify",
+  destination: Destination,
   prepare: () => Attempt
 ): Promise<void> {
-  return sendWithRetries(advertiserKey, operation, prepare, RETRY_DELAYS_MS);
+  return sendWithRetries(destination, prepare, RETRY_DELAYS_MS);
 }

@@ -4,7 +4,12 @@ import {
 } from "@specify-sh/core";
 
 import { bodyBytes, eventId, MAX_BODY_BYTES, send } from "./request.js";
-import { ADVERTISER_KEY_PATTERN, isUserId, isWallet } from "./validation.js";
+import {
+  ADVERTISER_KEY_PATTERN,
+  apiBase,
+  isUserId,
+  isWallet,
+} from "./validation.js";
 
 const MAX_DEDUPE_KEY_LENGTH = 256;
 
@@ -16,6 +21,8 @@ export const ValidationError: typeof CoreValidationError = CoreValidationError;
 export interface CaptureOptions {
   /** Your advertiser key, which starts with sak_ */
   advertiserKey: string;
+  /** Leave unset unless Specify gives you another API URL */
+  apiUrl?: string;
   /** Your own ID for this event, such as an order ID, so a repeat with the same event name counts once */
   dedupeKey?: string;
   /** The event name, such as "purchase" */
@@ -27,7 +34,7 @@ export interface CaptureOptions {
 }
 
 function validate(options: CaptureOptions): void {
-  const { advertiserKey, dedupeKey, event, identity, url } =
+  const { advertiserKey, apiUrl, dedupeKey, event, identity, url } =
     (options as Partial<CaptureOptions> | undefined) ?? {};
   if (
     typeof advertiserKey !== "string" ||
@@ -70,6 +77,11 @@ function validate(options: CaptureOptions): void {
       "url must be an absolute URL, such as https://shop.example/checkout."
     );
   }
+  if (apiBase(apiUrl) === undefined) {
+    throw new ValidationError(
+      "apiUrl must be an https URL without a query string. Leave it unset unless Specify gave you one."
+    );
+  }
 }
 
 /**
@@ -84,7 +96,7 @@ function validate(options: CaptureOptions): void {
  */
 export async function capture(options: CaptureOptions): Promise<void> {
   validate(options);
-  const { advertiserKey, dedupeKey, event, identity, url } = options;
+  const { advertiserKey, apiUrl, dedupeKey, event, identity, url } = options;
   const body = {
     events: [
       {
@@ -101,5 +113,8 @@ export async function capture(options: CaptureOptions): Promise<void> {
       "This event is larger than 16 KiB. Shorten its name or url."
     );
   }
-  await send(advertiserKey, "events", () => ({ body }));
+  await send(
+    { advertiserKey, apiUrl: apiBase(apiUrl) as string, operation: "events" },
+    () => ({ body })
+  );
 }
