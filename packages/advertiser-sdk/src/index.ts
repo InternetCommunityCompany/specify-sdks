@@ -34,12 +34,6 @@ interface CapturedEvent {
   url: string;
 }
 
-interface Batch {
-  events: CapturedEvent[];
-  identity: Snapshot;
-  key: string;
-}
-
 type Consent = "pending" | "granted" | "denied";
 
 function pageUrl(): string | undefined {
@@ -51,6 +45,14 @@ function clickTokenIn(url: string): string | undefined {
   return token !== null && token.length <= MAX_CLICK_TOKEN_LENGTH
     ? token
     : undefined;
+}
+
+function identifiesWithoutCookie(identity: Snapshot): boolean {
+  return (
+    identity.spclk !== undefined ||
+    identity.userId !== undefined ||
+    identity.walletAddresses.length > 0
+  );
 }
 
 function contained(run: () => void): boolean {
@@ -75,7 +77,7 @@ export default class Specify {
   private readonly wallets = new Set<Address>();
   private clickToken: string | undefined;
   private lastIdentify: string | undefined;
-  private readonly pending: Batch[] = [];
+  private readonly held: CapturedEvent[][] = [];
   private flushing: Promise<void> | null = null;
 
   /**
@@ -104,7 +106,7 @@ export default class Specify {
    * Passes on the visitor's consent for advertising
    *
    * Call it on every page load once your consent manager knows the answer,
-   * and again whenever it changes. Nothing is sent until the first call.
+   * and again whenever it changes.
    *
    * @param granted - Whether the visitor consented
    */
@@ -119,10 +121,12 @@ export default class Specify {
       if (previous === this.consent || !this.advertiserKey) {
         return;
       }
-      if (previous === "pending" || this.consent === "granted") {
+      if (this.consent === "granted") {
         this.sendIdentify(url);
+        this.flush();
+      } else {
+        this.held.splice(0);
       }
-      this.flush();
     });
   }
 
@@ -142,7 +146,7 @@ export default class Specify {
       if (url === undefined || !this.advertiserKey) {
         return;
       }
-      if (this.remember(walletOrUserId) && this.consent !== "pending") {
+      if (this.remember(walletOrUserId)) {
         this.sendIdentify(url);
       }
     });
@@ -178,11 +182,11 @@ export default class Specify {
       }
       const identity = this.snapshot(url);
       const captured = { id: eventId(), name: event, url };
-      if (this.consent === "pending") {
-        this.enqueue(identity, captured);
-        return;
+      if (identifiesWithoutCookie(identity) || this.consent === "granted") {
+        this.sendEvents(identity, [captured]);
+      } else if (this.consent === "pending") {
+        this.hold(captured);
       }
-      this.sendEvents(identity, [captured]);
     });
   }
 
@@ -273,32 +277,31 @@ export default class Specify {
     );
   }
 
-  private enqueue(identity: Snapshot, event: CapturedEvent): void {
-    const key = JSON.stringify(identity);
-    const lastIndex = this.pending.length - 1;
-    const last = this.pending[lastIndex];
+  private hold(event: CapturedEvent): void {
+    const lastIndex = this.held.length - 1;
+    const last = this.held[lastIndex];
     if (
-      last?.key === key &&
-      last.events.length < MAX_BATCH_EVENTS &&
+      last &&
+      last.length < MAX_BATCH_EVENTS &&
       bodyBytes(
-        this.attempt({ ...identity, events: [...last.events, event] }).body
+        this.attempt({ events: [...last, event], walletAddresses: [] }).body
       ) <= MAX_BODY_BYTES
     ) {
-      last.events.push(event);
+      last.push(event);
       return;
     }
-    this.pending.push({ events: [event], identity, key });
+    this.held.push([event]);
   }
 
   private flush(): void {
     if (this.flushing) {
       return;
     }
-    const batch = this.pending.shift();
+    const batch = this.held.shift();
     if (!batch) {
       return;
     }
-    this.flushing = this.sendEvents(batch.identity, batch.events).finally(
+    this.flushing = this.sendEvents({ walletAddresses: [] }, batch).finally(
       () => {
         this.flushing = null;
         this.flush();

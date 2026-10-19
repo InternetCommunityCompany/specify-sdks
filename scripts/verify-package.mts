@@ -78,9 +78,7 @@ function requireFile(files: string[], path: string): void {
   }
 }
 
-// Under moduleResolution NodeNext, TypeScript resolves a declaration's relative
-// import only with its .js extension. Without one, the imported types silently
-// become any for every integrator using Node ESM.
+// Under NodeNext, a declaration's relative import resolves only with its .js extension.
 function requireResolvableDeclarations(pkg: PackedPackage): void {
   for (const path of pkg.files.filter((file) => file.endsWith(".d.ts"))) {
     const source = readFileSync(
@@ -499,9 +497,9 @@ if (browser.ValidationError !== core.ValidationError || server.ValidationError !
     join(consumerDirectory, "advertiser-browser.ts"),
     `import Advertiser from "@specify-sh/advertiser-sdk";
 const advertiserClient = new Advertiser({ advertiserKey: "sak_0123456789abcdef0123456789abcd" });
+advertiserClient.setCookieConsent(true);
 advertiserClient.identify("customer");
-advertiserClient.capture("purchase");
-advertiserClient.setCookieConsent(true);`
+advertiserClient.capture("purchase");`
   );
   execFileSync(
     "bun",
@@ -527,9 +525,9 @@ dom.window.fetch = async (url, request) => { browserRequests.push({ request, url
 try {
   dom.window.eval(readFileSync(process.argv[1], "utf8"));
   await new Promise((resolve) => setTimeout(resolve, 50));
-  if (JSON.stringify(browserRequests.map(({ url }) => url)) !== JSON.stringify(["https://spfsrv.com/v1/identify", "https://spfsrv.com/v1/events"])) process.exit(1);
+  if (JSON.stringify(browserRequests.map(({ url }) => url)) !== JSON.stringify(["https://spfsrv.com/v1/identify", "https://spfsrv.com/v1/identify", "https://spfsrv.com/v1/events"])) process.exit(1);
   if (browserRequests.some(({ request }) => request.credentials !== "include")) process.exit(1);
-  const body = JSON.parse(browserRequests[1].request.body);
+  const body = JSON.parse(browserRequests[2].request.body);
   if (body.cookieConsent !== true || body.spclk !== "secret" || body.userId !== "customer" || body.source !== "browser" || new URL(body.events[0].url).searchParams.get("spclk") !== "secret") process.exit(1);
   if (!dom.window.location.search.includes("spclk")) process.exit(1);
 } finally {

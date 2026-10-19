@@ -22,6 +22,14 @@ function requests(fetchSpy: ReturnType<typeof mockService>) {
   }));
 }
 
+function eventNames(fetchSpy: ReturnType<typeof mockService>) {
+  return requests(fetchSpy)
+    .filter((request) => request.url.endsWith("/events"))
+    .map((request) =>
+      request.body.events.map((event: { name: string }) => event.name)
+    );
+}
+
 function settle() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -41,49 +49,102 @@ afterEach(() => {
 });
 
 describe("advertiser browser client", () => {
-  it("holds identification and events until the first consent call", async () => {
+  it("sends an identified visitor's calls without the cookie before consent, then identifies with it once granted", async () => {
     const landing = visit("/landing?spclk=click-token&spclk=second");
     const fetchSpy = mockService();
     const client = new Specify({ advertiserKey: KEY });
     client.identify("customer_123");
     client.capture("signup");
-    await settle();
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    client.setCookieConsent(true);
 
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
     const [identify, events] = requests(fetchSpy);
     expect(identify).toEqual({
       body: {
-        cookieConsent: true,
+        cookieConsent: false,
         source: "browser",
         spclk: "click-token",
         userId: "customer_123",
         walletAddresses: [],
       },
-      credentials: "include",
+      credentials: "omit",
       keepalive: true,
       url: "https://spfsrv.com/v1/identify",
     });
     expect(events.url).toBe("https://spfsrv.com/v1/events");
+    expect(events.credentials).toBe("omit");
     expect(events.body.events).toEqual([
       { id: expect.any(String), name: "signup", url: landing },
     ]);
     expect(fetchSpy.mock.calls[0]?.[1]?.headers).toMatchObject({
       "x-api-key": KEY,
     });
+
+    client.setCookieConsent(true);
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    expect(requests(fetchSpy)[2]).toMatchObject({
+      body: {
+        cookieConsent: true,
+        spclk: "click-token",
+        userId: "customer_123",
+      },
+      credentials: "include",
+      url: "https://spfsrv.com/v1/identify",
+    });
   });
 
-  it("sends without the cookie after a refusal", async () => {
+  it("sends events from an ad click before consent, without the cookie", async () => {
+    visit("/landing?spclk=click-token");
+    const fetchSpy = mockService();
+    new Specify({ advertiserKey: KEY }).capture("signup");
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(requests(fetchSpy)[0]).toMatchObject({
+      body: { cookieConsent: false, spclk: "click-token" },
+      credentials: "omit",
+      url: "https://spfsrv.com/v1/events",
+    });
+  });
+
+  it("holds an unidentified visitor's events until consent, then sends them with the cookie", async () => {
+    const fetchSpy = mockService();
+    const client = new Specify({ advertiserKey: KEY });
+    client.capture("anonymous");
+    client.identify("customer");
+    client.capture("identified");
+    client.reset();
+    client.capture("signed_out");
+    await settle();
+    expect(eventNames(fetchSpy)).toEqual([["identified"]]);
+
+    client.setCookieConsent(true);
+
+    await vi.waitFor(() =>
+      expect(eventNames(fetchSpy)).toEqual([
+        ["identified"],
+        ["anonymous", "signed_out"],
+      ])
+    );
+    const held = requests(fetchSpy).at(-1);
+    expect(held?.credentials).toBe("include");
+    expect(held?.body).toMatchObject({
+      cookieConsent: true,
+      walletAddresses: [],
+    });
+    expect(held?.body).not.toHaveProperty("userId");
+  });
+
+  it("drops an unidentified visitor's events after a refusal and sends the rest without the cookie", async () => {
     const fetchSpy = mockService();
     const client = new Specify({ advertiserKey: KEY });
     client.capture("held");
     client.setCookieConsent(false);
+    client.capture("anonymous");
     client.identify(WALLET_A);
     client.capture("live");
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(eventNames(fetchSpy)).toEqual([["live"]]);
     for (const request of requests(fetchSpy)) {
       expect(request.credentials).toBe("omit");
       expect(request.body.cookieConsent).toBe(false);
@@ -117,10 +178,11 @@ describe("advertiser browser client", () => {
     const checkout = visit("/checkout");
     client.identify("second");
     client.capture("checkout");
-    client.setCookieConsent(true);
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
-    const [, first, second] = requests(fetchSpy);
+    await vi.waitFor(() => expect(eventNames(fetchSpy)).toHaveLength(2));
+    const [first, second] = requests(fetchSpy).filter((request) =>
+      request.url.endsWith("/events")
+    );
     expect(first.body).toMatchObject({
       events: [{ name: "landing", url: landing }],
       userId: "first",
@@ -140,7 +202,7 @@ describe("advertiser browser client", () => {
     client.capture("signup");
     client.setCookieConsent(true);
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
     for (const request of requests(fetchSpy)) {
       expect(request.body.spclk).toBe("click-token");
     }
@@ -167,9 +229,7 @@ describe("advertiser browser client", () => {
   it("ignores an ad click token longer than 1024 characters", async () => {
     visit(`/landing?spclk=${"x".repeat(1025)}`);
     const fetchSpy = mockService();
-    const client = new Specify({ advertiserKey: KEY });
-    client.identify("customer");
-    client.setCookieConsent(true);
+    new Specify({ advertiserKey: KEY }).identify("customer");
 
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
     expect(requests(fetchSpy)[0]?.body).not.toHaveProperty("spclk");
@@ -190,9 +250,9 @@ describe("advertiser browser client", () => {
     ]) {
       client.identify(invalid as string);
     }
-    client.setCookieConsent(true);
+    await settle();
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledOnce();
     expect(requests(fetchSpy)[0]?.body).toMatchObject({
       userId: "customer",
       walletAddresses: [],
@@ -206,12 +266,11 @@ describe("advertiser browser client", () => {
     client.identify("two");
     client.identify(MIXED_CASE);
     client.identify([WALLET_B, MIXED_CASE.toLowerCase() as `0x${string}`]);
-    client.setCookieConsent(true);
     const wallets = Array.from({ length: 50 }, (_, index) => wallet(index + 1));
     client.identify(wallets);
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
-    const [first, second] = requests(fetchSpy);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(5));
+    const [first, second] = requests(fetchSpy).slice(3);
     expect(first?.body).toMatchObject({
       userId: "two",
       walletAddresses: [WALLET_B, MIXED_CASE.toLowerCase()],
@@ -245,8 +304,10 @@ describe("advertiser browser client", () => {
     client.capture("after");
     client.setCookieConsent(true);
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
-    const [before, after] = requests(fetchSpy);
+    await vi.waitFor(() => expect(eventNames(fetchSpy)).toHaveLength(2));
+    const [before, after] = requests(fetchSpy).filter((request) =>
+      request.url.endsWith("/events")
+    );
     expect(before?.body).toMatchObject({
       spclk: "click-token",
       userId: "customer",

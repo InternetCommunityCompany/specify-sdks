@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("advertiser event batching", () => {
-  it("sends held events with the same identity together, 50 per request", async () => {
+  it("sends held events together, 50 per request", async () => {
     const fetchSpy = mockService();
     const client = new Specify({ advertiserKey: KEY });
     for (let index = 0; index < 120; index += 1) {
@@ -70,30 +70,10 @@ describe("advertiser event batching", () => {
     }
   });
 
-  it("starts a new batch when the identity changes, keeping capture order", async () => {
-    const fetchSpy = mockService();
-    const client = new Specify({ advertiserKey: KEY });
-    client.capture("anonymous");
-    client.identify("customer");
-    client.capture("first");
-    client.capture("second");
-    client.reset();
-    client.capture("signed_out");
-    client.setCookieConsent(true);
-
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
-    expect(names(fetchSpy)).toEqual([
-      ["anonymous"],
-      ["first", "second"],
-      ["signed_out"],
-    ]);
-  });
-
   it("sends held batches one at a time while new events go straight out", async () => {
     let release: (() => void) | undefined;
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -102,18 +82,21 @@ describe("advertiser event batching", () => {
       )
       .mockResolvedValue(new Response(null, { status: 200 }));
     const client = new Specify({ advertiserKey: KEY });
-    client.capture("held_1");
-    client.identify("customer");
-    client.capture("held_2");
-    client.setCookieConsent(false);
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    for (let index = 0; index < 51; index += 1) {
+      client.capture(`held_${index}`);
+    }
+    client.setCookieConsent(true);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
 
     client.capture("live");
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
     release?.();
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(4));
-    expect(names(fetchSpy)).toEqual([["held_1"], ["live"], ["held_2"]]);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    const [first, live, last] = names(fetchSpy);
+    expect(first).toHaveLength(50);
+    expect(live).toEqual(["live"]);
+    expect(last).toEqual(["held_50"]);
   });
 
   it("drops an event too large to send and still sends the rest", async () => {
