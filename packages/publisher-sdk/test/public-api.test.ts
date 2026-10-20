@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { VALID_MOCK_PUBLISHER_KEY } from "./consts";
 
 describe("public API", () => {
   it("preserves the complete public surface", async () => {
@@ -24,10 +25,12 @@ describe("public API", () => {
 
   it("exposes the instance methods", async () => {
     const { default: Specify } = await import("../src");
+    const specify = new Specify({ publisherKey: VALID_MOCK_PUBLISHER_KEY });
 
-    expect(Specify.prototype.setCookieConsent).toBeTypeOf("function");
-    expect(Specify.prototype.hasCookieConsent).toBeTypeOf("function");
-    expect(Specify.prototype.identify).toBeTypeOf("function");
-    expect(Specify.prototype.onIdentityChange).toBeTypeOf("function");
+    expect(specify.serve).toBeTypeOf("function");
+    expect(specify.setCookieConsent).toBeTypeOf("function");
+    expect(specify.hasCookieConsent).toBeTypeOf("function");
+    expect(specify.identify).toBeTypeOf("function");
+    expect(specify.onIdentityChange).toBeTypeOf("function");
   });
 });

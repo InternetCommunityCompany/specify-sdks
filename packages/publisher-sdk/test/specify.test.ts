@@ -6,7 +6,18 @@ import Specify, {
   type SpecifyInitConfig,
   ValidationError,
 } from "../src";
-import { VALID_MOCK_PUBLISHER_KEY, VALID_MOCK_WALLET_ADDRESS } from "./consts";
+import {
+  distinctWalletAddresses,
+  INVALID_PUBLISHER_KEY_MESSAGE,
+  LONG_WALLET_ADDRESS,
+  LOWER_CASE_WALLET_ADDRESS,
+  MIXED_CASE_WALLET_ADDRESS,
+  SHORT_WALLET_ADDRESS,
+  SOLANA_ADDRESS,
+  UNPREFIXED_MOCK_PUBLISHER_KEY,
+  VALID_MOCK_PUBLISHER_KEY,
+  VALID_MOCK_WALLET_ADDRESS,
+} from "./consts";
 import { setupMockFetch } from "./helpers";
 
 const mockAd = {
@@ -30,6 +41,14 @@ function requestBody(request: RequestInit): unknown {
   return JSON.parse(String(request.body));
 }
 
+// Listeners are promised a call shortly after a change, not within a set
+// number of microtasks, so the wait has to outlast all of them.
+function nextMacrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 describe("Specify", () => {
   describe("constructor", () => {
     it("initializes with a valid publisher key", () => {
@@ -46,16 +65,18 @@ describe("Specify", () => {
       ).toBeInstanceOf(Specify);
     });
 
-    it("throws ValidationError for an invalid publisher key", () => {
-      expect(() => new Specify({ publisherKey: "invalid_key" })).toThrow(
-        ValidationError
+    it.each([
+      ["an unrelated string", "invalid_key"],
+      ["a key that is too short", "spk_short"],
+      ["a key that is too long", `spk_${"a".repeat(31)}`],
+      [
+        "a full-length key without the spk_ prefix",
+        UNPREFIXED_MOCK_PUBLISHER_KEY,
+      ],
+    ])("throws ValidationError for %s", (_label, publisherKey) => {
+      expect(() => new Specify({ publisherKey })).toThrow(
+        new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE)
       );
-      expect(() => new Specify({ publisherKey: "spk_short" })).toThrow(
-        ValidationError
-      );
-      expect(
-        () => new Specify({ publisherKey: `spk_${"a".repeat(31)}` })
-      ).toThrow(ValidationError);
     });
 
     it.each([undefined, null, 1])(
@@ -63,7 +84,7 @@ describe("Specify", () => {
       (publisherKey) => {
         expect(
           () => new Specify({ publisherKey } as unknown as SpecifyInitConfig)
-        ).toThrow(ValidationError);
+        ).toThrow(new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE));
       }
     );
   });
@@ -91,6 +112,36 @@ describe("Specify", () => {
       ).resolves.toEqual(mockAd);
     });
 
+    it("sends the configured publisher key", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+
+      await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
+
+      expect(new Headers(requests[0]?.headers).get("x-api-key")).toBe(
+        VALID_MOCK_PUBLISHER_KEY
+      );
+    });
+
+    it("sends the placement and addresses on the wire", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+
+      await specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+        adUnitId: "header",
+        imageFormat: ImageFormat.LONG_BANNER,
+      });
+
+      expect(requestBody(requests[0] ?? {})).toEqual({
+        adUnitId: "header",
+        cookieConsent: false,
+        imageFormat: ImageFormat.LONG_BANNER,
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+    });
+
     it("deduplicates addresses before sending them", async () => {
       const specify = createSpecify();
       const { requests } = setupMockFetch(mockAd);
@@ -105,9 +156,39 @@ describe("Specify", () => {
       });
     });
 
+    it("sends case variants of an address once, lowercased", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+
+      await specify.serve(
+        [MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
+        { imageFormat: ImageFormat.LANDSCAPE }
+      );
+
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [LOWER_CASE_WALLET_ADDRESS],
+      });
+    });
+
+    it("counts case variants as one address toward the limit", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+      const distinct = distinctWalletAddresses(49);
+
+      await expect(
+        specify.serve(
+          [...distinct, MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
+          { imageFormat: ImageFormat.LANDSCAPE }
+        )
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [...distinct, LOWER_CASE_WALLET_ADDRESS],
+      });
+    });
+
     it("applies the address limit after deduplication", async () => {
       const specify = createSpecify();
-      setupMockFetch(mockAd);
+      const { requests } = setupMockFetch(mockAd);
 
       await expect(
         specify.serve(
@@ -117,21 +198,44 @@ describe("Specify", () => {
           }
         )
       ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
     });
 
-    it("throws ValidationError for an invalid wallet address", async () => {
+    it.each([
+      ["a Solana address", SOLANA_ADDRESS],
+      ["an address without the 0x prefix", "invalid_address" as Address],
+      ["an address with non-hex characters", "0xinvalid" as Address],
+      ["an address with 39 hex digits", SHORT_WALLET_ADDRESS],
+      ["an address with 41 hex digits", LONG_WALLET_ADDRESS],
+      [
+        "an address wrapped in an array",
+        [LOWER_CASE_WALLET_ADDRESS] as unknown as Address,
+      ],
+    ])("skips %s and serves with the rest", async (_label, address) => {
       const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
 
       await expect(
-        specify.serve("invalid_address" as Address, {
+        specify.serve([address, VALID_MOCK_WALLET_ADDRESS], {
           imageFormat: ImageFormat.LANDSCAPE,
         })
-      ).rejects.toThrow(ValidationError);
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+    });
+
+    it("returns null without a request when no address is an EVM wallet address and there is no consent", async () => {
+      const specify = createSpecify();
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+
       await expect(
-        specify.serve("0xinvalid" as Address, {
-          imageFormat: ImageFormat.LANDSCAPE,
-        })
-      ).rejects.toThrow(ValidationError);
+        specify.serve(SOLANA_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("returns null without a request for an empty address array without consent", async () => {
@@ -145,16 +249,30 @@ describe("Specify", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("throws ValidationError for more than 50 unique addresses", async () => {
+    it("accepts exactly 50 distinct addresses", async () => {
       const specify = createSpecify();
-      const manyAddresses = Array.from(
-        { length: 51 },
-        (_, index) => `0x${index.toString().padStart(40, "0")}` as Address
-      );
+      const { requests } = setupMockFetch(mockAd);
+      const addresses = distinctWalletAddresses(50);
 
       await expect(
-        specify.serve(manyAddresses, { imageFormat: ImageFormat.LANDSCAPE })
-      ).rejects.toThrow(ValidationError);
+        specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: addresses,
+      });
+    });
+
+    it("sends the first 50 of more than 50 distinct addresses", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
+      const addresses = distinctWalletAddresses(51);
+
+      await expect(
+        specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: addresses.slice(0, 50),
+      });
     });
 
     it.each([400, 401, 404, 500, 502, 503])(
@@ -261,13 +379,13 @@ describe("Specify", () => {
         imageUrl: null,
         serviceMetadata: "unchanged",
       };
-      setupMockFetch(response);
+      globalThis.fetch = vi.fn().mockResolvedValue(Response.json(response));
 
       await expect(
         specify.serve(VALID_MOCK_WALLET_ADDRESS, {
           imageFormat: ImageFormat.NO_IMAGE,
         })
-      ).resolves.toBe(response);
+      ).resolves.toEqual(response);
     });
 
     it.each([
@@ -315,23 +433,6 @@ describe("Specify", () => {
           adUnitId: "header",
         });
       });
-
-      it.each([undefined, null])(
-        "treats %s as no addresses like today",
-        async (empty) => {
-          const specify = createSpecify();
-          const { fetch, requests } = setupMockFetch(undefined, 204);
-
-          specify.setCookieConsent(true);
-          await expect(
-            specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
-          ).resolves.toBeNull();
-          expect(fetch).toHaveBeenCalledOnce();
-          expect(requestBody(requests[0] ?? {})).toMatchObject({
-            walletAddresses: [],
-          });
-        }
-      );
     });
 
     it("returns null without a request without consent and identified addresses", async () => {
@@ -361,17 +462,16 @@ describe("Specify", () => {
       );
     });
 
-    it.each([undefined, null])(
-      "treats %s as no addresses like today",
-      async (empty) => {
-        const specify = createSpecify();
-        setupMockFetch(mockAd);
+    it.each([undefined, null])("treats %s as no addresses", async (empty) => {
+      const specify = createSpecify();
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
 
-        await expect(
-          specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
-        ).resolves.toBeNull();
-      }
-    );
+      await expect(
+        specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
 
     it("throws ValidationError when called with no arguments at all", async () => {
       const specify = createSpecify();
@@ -379,7 +479,11 @@ describe("Specify", () => {
       await expect(
         // @ts-expect-error JavaScript callers can omit every argument
         specify.serve()
-      ).rejects.toThrow(ValidationError);
+      ).rejects.toThrow(
+        new ValidationError(
+          "serve() needs an options object with an imageFormat; pass serve({ imageFormat }) or serve(addresses, { imageFormat })"
+        )
+      );
     });
   });
 
@@ -426,18 +530,17 @@ describe("Specify", () => {
         });
       });
 
-      it("sends a case-duplicated address once, in the caller's casing", async () => {
+      it("sends a registered address and its case variant once", async () => {
         const specify = createSpecify();
         const { requests } = setupMockFetch(mockAd);
-        const checksummed = `0x${"AbCd".repeat(10)}` as Address;
 
-        specify.identify(checksummed.toLowerCase() as Address);
-        await specify.serve(checksummed, {
+        specify.identify(MIXED_CASE_WALLET_ADDRESS);
+        await specify.serve(LOWER_CASE_WALLET_ADDRESS, {
           imageFormat: ImageFormat.LANDSCAPE,
         });
 
         expect(requestBody(requests[0] ?? {})).toMatchObject({
-          walletAddresses: [checksummed],
+          walletAddresses: [LOWER_CASE_WALLET_ADDRESS],
         });
       });
 
@@ -453,21 +556,20 @@ describe("Specify", () => {
         expect(fetchMock).not.toHaveBeenCalled();
       });
 
-      it("registers nothing from a call with a malformed address", async () => {
+      it("registers the EVM wallet addresses from a call that mixes in others", async () => {
         const specify = createSpecify();
-        const fetchMock = vi.fn();
-        globalThis.fetch = fetchMock;
+        const { requests } = setupMockFetch(mockAd);
 
-        expect(() =>
-          specify.identify([
-            VALID_MOCK_WALLET_ADDRESS,
-            "not-an-address" as Address,
-          ])
-        ).toThrow(ValidationError);
-        await expect(
-          specify.serve({ imageFormat: ImageFormat.LANDSCAPE })
-        ).resolves.toBeNull();
-        expect(fetchMock).not.toHaveBeenCalled();
+        specify.identify([
+          SOLANA_ADDRESS,
+          VALID_MOCK_WALLET_ADDRESS,
+          "0xinvalid" as Address,
+        ]);
+        await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        });
       });
 
       it("keeps the 50 most recent registrations", async () => {
@@ -550,7 +652,7 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
         specify.setCookieConsent(true);
         expect(listener).not.toHaveBeenCalled();
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledExactlyOnceWith();
       });
@@ -562,7 +664,7 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
         specify.setCookieConsent(true);
         specify.setCookieConsent(true);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -574,7 +676,7 @@ describe("Specify", () => {
         specify.setCookieConsent(true);
         specify.onIdentityChange(listener);
         specify.setCookieConsent(false);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -585,7 +687,7 @@ describe("Specify", () => {
 
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -596,10 +698,10 @@ describe("Specify", () => {
         const { requests } = setupMockFetch(mockAd);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
 
         expect(listener).not.toHaveBeenCalled();
@@ -619,11 +721,11 @@ describe("Specify", () => {
         for (const address of addresses) {
           specify.identify(address);
         }
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(1);
 
         specify.identify(`0x${"dd".repeat(20)}` as Address);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(2);
       });
 
@@ -634,23 +736,18 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
         specify.setCookieConsent(true);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
 
-      it("produces no callback for a batch containing a malformed address", async () => {
+      it("produces no callback for a batch with no EVM wallet address", async () => {
         const specify = createSpecify();
         const listener = vi.fn();
 
         specify.onIdentityChange(listener);
-        expect(() =>
-          specify.identify([
-            VALID_MOCK_WALLET_ADDRESS,
-            "not-an-address" as Address,
-          ])
-        ).toThrow(ValidationError);
-        await Promise.resolve();
+        specify.identify([SOLANA_ADDRESS, "0xinvalid" as Address]);
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -661,7 +758,7 @@ describe("Specify", () => {
 
         specify.onIdentityChange(listener);
         specify.identify([]);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -675,13 +772,13 @@ describe("Specify", () => {
         specify.onIdentityChange(second);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(first).toHaveBeenCalledTimes(1);
         expect(second).toHaveBeenCalledTimes(1);
 
         unsubscribeFirst();
         specify.identify(`0x${"ee".repeat(20)}` as Address);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(first).toHaveBeenCalledTimes(1);
         expect(second).toHaveBeenCalledTimes(2);
       });
@@ -694,12 +791,12 @@ describe("Specify", () => {
         specify.onIdentityChange(listener);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(2);
 
         firstUnsubscribe();
         specify.identify(`0x${"ee".repeat(20)}` as Address);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(3);
       });
 
@@ -712,7 +809,7 @@ describe("Specify", () => {
         unsubscribe();
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -728,7 +825,7 @@ describe("Specify", () => {
         detachLate = specify.onIdentityChange(late);
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(late).not.toHaveBeenCalled();
       });
@@ -744,11 +841,11 @@ describe("Specify", () => {
         specify.onIdentityChange(afterThrower);
 
         expect(() => specify.identify(VALID_MOCK_WALLET_ADDRESS)).not.toThrow();
-        await Promise.resolve();
+        await nextMacrotask();
         expect(afterThrower).toHaveBeenCalledTimes(1);
 
         specify.identify(otherAddress);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(afterThrower).toHaveBeenCalledTimes(2);
       });
 
@@ -762,13 +859,13 @@ describe("Specify", () => {
         );
 
         specify.identify(addresses);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).not.toHaveBeenCalled();
 
         specify.onIdentityChange(listener);
         const fiftyFirst = `0x${"ff".repeat(20)}` as Address;
         specify.identify(fiftyFirst);
-        await Promise.resolve();
+        await nextMacrotask();
         expect(listener).toHaveBeenCalledTimes(1);
 
         await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
@@ -789,11 +886,11 @@ describe("Specify", () => {
         );
 
         specify.identify(addresses);
-        await Promise.resolve();
+        await nextMacrotask();
         specify.onIdentityChange(listener);
 
         specify.identify(addresses[25] as Address);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -804,24 +901,22 @@ describe("Specify", () => {
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
         specify.onIdentityChange(listener);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
 
-      it("fires for a case variant of an already-registered address", async () => {
+      it("does not fire for a case variant of an already-registered address", async () => {
         const specify = createSpecify();
         const listener = vi.fn();
-        const lower = `0x${"ab".repeat(20)}` as Address;
-        const upper = `0x${"AB".repeat(20)}` as Address;
 
-        specify.identify(lower);
-        await Promise.resolve();
+        specify.identify(LOWER_CASE_WALLET_ADDRESS);
+        await nextMacrotask();
         specify.onIdentityChange(listener);
-        specify.identify(upper);
-        await Promise.resolve();
+        specify.identify(MIXED_CASE_WALLET_ADDRESS);
+        await nextMacrotask();
 
-        expect(listener).toHaveBeenCalledTimes(1);
+        expect(listener).not.toHaveBeenCalled();
       });
 
       it("notifies once more when a listener registers a new address during the flush", async () => {
@@ -838,7 +933,7 @@ describe("Specify", () => {
         });
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await nextMacrotask();
 
         expect(calls).toEqual([1, 2]);
       });
@@ -851,7 +946,7 @@ describe("Specify", () => {
 
         specify.onIdentityChange(listener);
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await nextMacrotask();
 
         expect(listener).toHaveBeenCalledTimes(1);
       });
@@ -867,7 +962,7 @@ describe("Specify", () => {
 
         specify.identify(VALID_MOCK_WALLET_ADDRESS);
         specify.setCookieConsent(true);
-        await Promise.resolve();
+        await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
       });
@@ -901,24 +996,26 @@ describe("Specify", () => {
         expect(specify.hasCookieConsent()).toBe(true);
       });
 
-      it("issues a request with consent and no addresses", async () => {
-        const specify = createSpecify();
-        const { fetch, requests } = setupMockFetch(undefined, 204);
+      it.each([[], undefined, null])(
+        "issues a request with consent and %s as the addresses",
+        async (empty) => {
+          const specify = createSpecify();
+          const { fetch, requests } = setupMockFetch(undefined, 204);
 
-        specify.setCookieConsent(true);
-        await expect(
-          specify.serve([], { imageFormat: ImageFormat.NO_IMAGE })
-        ).resolves.toBeNull();
-        expect(fetch).toHaveBeenCalledOnce();
-        expect(requestBody(requests[0] ?? {})).toMatchObject({
-          cookieConsent: true,
-          walletAddresses: [],
-        });
-      });
+          specify.setCookieConsent(true);
+          await expect(
+            specify.serve(empty, { imageFormat: ImageFormat.NO_IMAGE })
+          ).resolves.toBeNull();
+          expect(fetch).toHaveBeenCalledOnce();
+          expect(requestBody(requests[0] ?? {})).toMatchObject({
+            cookieConsent: true,
+            walletAddresses: [],
+          });
+        }
+      );
 
       it("withdraws consent granted through the setter", async () => {
         const specify = createSpecify();
-        setupMockFetch(mockAd);
         const fetchMock = vi.fn();
         globalThis.fetch = fetchMock;
 
@@ -987,6 +1084,38 @@ describe("Specify", () => {
         specify.setCookieConsent(true);
         expect(specify.hasCookieConsent()).toBe(false);
       });
+    });
+  });
+
+  describe.runIf(typeof window !== "undefined")("separate instances", () => {
+    it("keeps one instance's identity and consent out of another", async () => {
+      const first = createSpecify();
+      const second = createSpecify();
+      const secondListener = vi.fn();
+      second.onIdentityChange(secondListener);
+      const { requests } = setupMockFetch(mockAd);
+      const firstAddress = `0x${"ab".repeat(20)}` as Address;
+
+      first.identify(firstAddress);
+      first.setCookieConsent(true);
+      await first.serve({ imageFormat: ImageFormat.LANDSCAPE });
+      await second.serve(VALID_MOCK_WALLET_ADDRESS, {
+        imageFormat: ImageFormat.LANDSCAPE,
+      });
+      await nextMacrotask();
+
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        cookieConsent: true,
+        walletAddresses: [firstAddress],
+      });
+      expect(requests[1]?.credentials).toBe("omit");
+      expect(requestBody(requests[1] ?? {})).toEqual({
+        cookieConsent: false,
+        imageFormat: ImageFormat.LANDSCAPE,
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+      expect(second.hasCookieConsent()).toBe(false);
+      expect(secondListener).not.toHaveBeenCalled();
     });
   });
 });

@@ -5,6 +5,7 @@ import {
   type ImageFormat as CoreImageFormatType,
   type SpecifyAd as CoreSpecifyAd,
   ValidationError as CoreValidationError,
+  MAX_WALLET_ADDRESSES,
   prepareWalletAddresses,
   requestAd,
 } from "@specify-sh/core";
@@ -31,9 +32,13 @@ export interface ServeOptions {
 /**
  * Serves an ad from a server
  *
+ * Anything that isn't an EVM wallet address, such as a Solana address, is
+ * skipped, and at most 50 addresses are sent. Addresses that differ only in
+ * letter case count once.
+ *
  * @param options - Publisher key, wallet addresses, image format, and an optional ad unit id
- * @returns An ad, or null for no ad, an API failure, or a network failure
- * @throws {ValidationError} When the publisher key or an address is malformed, no addresses are given, or more than 50 are
+ * @returns An ad, or null for no ad, no EVM wallet address, an API failure, or a network failure
+ * @throws {ValidationError} When the publisher key is malformed or no addresses are given
  */
 export async function serve(options: ServeOptions): Promise<SpecifyAd | null> {
   assertValidPublisherKey(options.publisherKey);
@@ -45,7 +50,13 @@ export async function serve(options: ServeOptions): Promise<SpecifyAd | null> {
       "serve() needs at least one wallet address. A server request has no identity cookie to fall back on, so there is nothing to match."
     );
   }
-  const walletAddresses = prepareWalletAddresses(options.walletAddresses);
+  const walletAddresses = prepareWalletAddresses(options.walletAddresses).slice(
+    0,
+    MAX_WALLET_ADDRESSES
+  );
+  if (walletAddresses.length === 0) {
+    return null;
+  }
 
   return await requestAd({
     adUnitId: options.adUnitId,

@@ -37,12 +37,6 @@ function toWalletKey(wallets: Address | Address[] | undefined | null): string {
   return wallets ?? "";
 }
 
-function toWalletAddresses(walletKey: string): Address[] {
-  return walletKey
-    .split(",")
-    .filter((entry): entry is Address => entry.startsWith("0x"));
-}
-
 /**
  * Fills an ad slot in a Client Component, using identify() and the current consent
  *
@@ -56,6 +50,7 @@ export function useSpecifyAd(options: UseSpecifyAdOptions): SpecifyAd | null;
  * Fills an ad slot in a Client Component for the given wallet address or addresses
  *
  * The wallets only matter for the first serve; once the slot fills, later renders ignore them.
+ * Anything that isn't an EVM wallet address, such as a Solana address, is skipped.
  *
  * @param addressOrAddresses - One address, an array of them, or nothing to rely on identify() and consent alone
  * @param options - The Specify client and how to serve this placement
@@ -84,14 +79,14 @@ export function useSpecifyAd(
     let active = true;
     const request = () => {
       specify
-        .serve(toWalletAddresses(walletKey), { adUnitId, imageFormat })
+        .serve(walletKey.split(",") as Address[], { adUnitId, imageFormat })
         .then((result) => {
           if (active && result) {
             setAd((current) => current ?? result);
           }
         })
         .catch(() => {
-          // A bad address must not break the host; the slot just stays empty.
+          // Nothing here should reject, but if it does the host must not see it.
         });
     };
     const unsubscribe = specify.onIdentityChange(request);

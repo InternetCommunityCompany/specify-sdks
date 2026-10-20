@@ -6,7 +6,18 @@ import {
   serve,
   ValidationError,
 } from "../src/server";
-import { VALID_MOCK_PUBLISHER_KEY, VALID_MOCK_WALLET_ADDRESS } from "./consts";
+import {
+  distinctWalletAddresses,
+  INVALID_PUBLISHER_KEY_MESSAGE,
+  LONG_WALLET_ADDRESS,
+  LOWER_CASE_WALLET_ADDRESS,
+  MIXED_CASE_WALLET_ADDRESS,
+  SHORT_WALLET_ADDRESS,
+  SOLANA_ADDRESS,
+  UNPREFIXED_MOCK_PUBLISHER_KEY,
+  VALID_MOCK_PUBLISHER_KEY,
+  VALID_MOCK_WALLET_ADDRESS,
+} from "./consts";
 import { setupMockFetch } from "./helpers";
 
 const mockAd = {
@@ -38,9 +49,9 @@ function options(walletAddresses: Address[] = [VALID_MOCK_WALLET_ADDRESS]) {
 describe("serve", () => {
   it("returns a 200 body exactly as received", async () => {
     const response = { ...mockAd, serviceMetadata: "unchanged" };
-    setupMockFetch(response);
+    globalThis.fetch = vi.fn().mockResolvedValue(Response.json(response));
 
-    await expect(serve(options())).resolves.toBe(response);
+    await expect(serve(options())).resolves.toEqual(response);
   });
 
   it("sends the server request without browser identity fields", async () => {
@@ -79,15 +90,54 @@ describe("serve", () => {
     });
   });
 
-  it("rejects a malformed publisher key before requesting", async () => {
-    const fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
+  it("sends case variants of an address once, lowercased", async () => {
+    const { requests } = setupMockFetch(mockAd);
+
+    await serve(
+      options([MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS])
+    );
+
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: [LOWER_CASE_WALLET_ADDRESS],
+    });
+  });
+
+  it("counts case variants as one address toward the limit", async () => {
+    const { requests } = setupMockFetch(mockAd);
+    const distinct = distinctWalletAddresses(49);
 
     await expect(
-      serve({ ...options(), publisherKey: "invalid" })
-    ).rejects.toThrow(ValidationError);
-    expect(fetchMock).not.toHaveBeenCalled();
+      serve(
+        options([
+          ...distinct,
+          MIXED_CASE_WALLET_ADDRESS,
+          LOWER_CASE_WALLET_ADDRESS,
+        ])
+      )
+    ).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: [...distinct, LOWER_CASE_WALLET_ADDRESS],
+    });
   });
+
+  it.each([
+    ["an unrelated string", "invalid"],
+    [
+      "a full-length key without the spk_ prefix",
+      UNPREFIXED_MOCK_PUBLISHER_KEY,
+    ],
+  ])(
+    "rejects %s as the publisher key before requesting",
+    async (_label, publisherKey) => {
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+
+      await expect(serve({ ...options(), publisherKey })).rejects.toThrow(
+        new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE)
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects a missing publisher key with ValidationError before requesting", async () => {
     const fetchMock = vi.fn();
@@ -95,7 +145,7 @@ describe("serve", () => {
 
     await expect(
       serve({ ...options(), publisherKey: undefined as unknown as string })
-    ).rejects.toThrow(ValidationError);
+    ).rejects.toThrow(new ValidationError(INVALID_PUBLISHER_KEY_MESSAGE));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -113,30 +163,63 @@ describe("serve", () => {
         // @ts-expect-error JavaScript callers can provide an invalid value
         walletAddresses,
       })
-    ).rejects.toThrow(ValidationError);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a malformed address before requesting", async () => {
-    const fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-
-    await expect(serve(options(["0xinvalid" as Address]))).rejects.toThrow(
-      ValidationError
+    ).rejects.toThrow(
+      new ValidationError(
+        "serve() needs at least one wallet address. A server request has no identity cookie to fall back on, so there is nothing to match."
+      )
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects more than 50 unique addresses before requesting", async () => {
+  it.each([
+    ["a Solana address", SOLANA_ADDRESS],
+    ["an address without the 0x prefix", "invalid_address" as Address],
+    ["an address with non-hex characters", "0xinvalid" as Address],
+    ["an address with 39 hex digits", SHORT_WALLET_ADDRESS],
+    ["an address with 41 hex digits", LONG_WALLET_ADDRESS],
+    [
+      "an address wrapped in an array",
+      [LOWER_CASE_WALLET_ADDRESS] as unknown as Address,
+    ],
+  ])("skips %s and serves with the rest", async (_label, address) => {
+    const { requests } = setupMockFetch(mockAd);
+
+    await expect(
+      serve(options([address, VALID_MOCK_WALLET_ADDRESS]))
+    ).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+    });
+  });
+
+  it("returns null without a request when no address is an EVM wallet address", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
-    const addresses = Array.from(
-      { length: 51 },
-      (_, index) => `0x${index.toString(16).padStart(40, "0")}` as Address
-    );
 
-    await expect(serve(options(addresses))).rejects.toThrow(ValidationError);
+    await expect(
+      serve(options([SOLANA_ADDRESS, "0xinvalid" as Address]))
+    ).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts exactly 50 distinct addresses", async () => {
+    const { requests } = setupMockFetch(mockAd);
+    const addresses = distinctWalletAddresses(50);
+
+    await expect(serve(options(addresses))).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: addresses,
+    });
+  });
+
+  it("sends the first 50 of more than 50 distinct addresses", async () => {
+    const { requests } = setupMockFetch(mockAd);
+    const addresses = distinctWalletAddresses(51);
+
+    await expect(serve(options(addresses))).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: addresses.slice(0, 50),
+    });
   });
 
   it("returns null for 204 without parsing the body", async () => {
