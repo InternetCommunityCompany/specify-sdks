@@ -1,327 +1,329 @@
 import {
-  assertValidAddresses,
   type Address as CoreAddress,
   MAX_WALLET_ADDRESSES,
 } from "@specify-sh/core";
 
-import { MAX_BODY_BYTES, requestAdvertiser } from "./request";
+import {
+  type Attempt,
+  bodyBytes,
+  eventId,
+  MAX_BODY_BYTES,
+  send,
+} from "./request.js";
+import {
+  ADVERTISER_KEY_PATTERN,
+  apiBase,
+  isUserId,
+  isWallet,
+} from "./validation.js";
 
 const MAX_BATCH_EVENTS = 50;
+const MAX_CLICK_TOKEN_LENGTH = 1024;
 
 export type Address = CoreAddress;
 
 export interface SpecifyInitConfig {
-  /** Your organization's advertiser key. */
+  /** Your advertiser key, which starts with sak_ */
   advertiserKey: string;
+  /** Leave unset unless Specify gives you another API URL */
+  apiUrl?: string;
 }
 
-export interface CaptureOptions {
-  /** An absolute server event URL; browser calls use the current page URL. */
-  url?: string;
+interface Snapshot {
+  spclk?: string;
+  userId?: string;
+  walletAddresses: Address[];
 }
 
-interface PendingBatch {
-  body: {
-    cookieConsent: boolean;
-    events: { name: string; url: string }[];
-    source: "browser";
-    spclk?: string;
-    userId?: string;
-    walletAddresses: Address[];
-  };
-  contextKey: string;
+interface CapturedEvent {
+  id?: string;
+  name: string;
+  url: string;
 }
 
+type Consent = "pending" | "granted" | "denied";
+
+function pageUrl(): string | undefined {
+  return typeof window === "undefined" ? undefined : window.location?.href;
+}
+
+function clickTokenIn(url: string): string | undefined {
+  const token = new URL(url).searchParams.get("spclk");
+  return token && token.length <= MAX_CLICK_TOKEN_LENGTH ? token : undefined;
+}
+
+function identifiesWithoutCookie(identity: Snapshot): boolean {
+  return (
+    identity.spclk !== undefined ||
+    identity.userId !== undefined ||
+    identity.walletAddresses.length > 0
+  );
+}
+
+function contained(run: () => void): boolean {
+  try {
+    run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Specify Advertiser SDK client for the browser
+ *
+ * Every method does nothing outside a browser, such as during a server
+ * render. Use `@specify-sh/advertiser-sdk/server` on a server.
+ */
 export default class Specify {
-  private readonly advertiserKey: string = "";
-  private cookieConsent: boolean;
+  private readonly advertiserKey: string;
+  private readonly apiUrl: string;
+  private consent: Consent = "pending";
   private userId: string | undefined;
-  private readonly identifiedAddresses = new Set<Address>();
-  private readonly pendingBatches: PendingBatch[] = [];
-  private pendingIdentification: boolean;
-  private sending: Promise<number | null> | null = null;
+  private readonly wallets = new Set<Address>();
+  private clickToken: string | undefined;
+  private lastIdentify: string | undefined;
+  private readonly held: CapturedEvent[][] = [];
+  private flushing: Promise<void> | null = null;
 
   /**
-   * Browser consent starts false; call setCookieConsent on page load.
-   * @param config - Your organization's advertiser key.
+   * Creates the Specify client
+   *
+   * Create one client and import it wherever you need it. Load it on every
+   * page of your site, including the pages your ads link to.
+   *
+   * @param config - Client configuration
+   * @param config.advertiserKey - Your advertiser key, which starts with sak_
+   * @param config.apiUrl - Leave unset unless Specify gives you another API URL
    */
   constructor(config: SpecifyInitConfig) {
-    this.cookieConsent = false;
-    this.pendingIdentification = false;
-
-    try {
-      if (
-        typeof config.advertiserKey === "string" &&
-        config.advertiserKey.trim().length > 0
-      ) {
-        this.advertiserKey = config.advertiserKey;
+    const { advertiserKey: key, apiUrl } =
+      (config as Partial<SpecifyInitConfig> | undefined) ?? {};
+    const trimmed = typeof key === "string" ? key.trim() : "";
+    const api = apiBase(apiUrl);
+    this.advertiserKey =
+      ADVERTISER_KEY_PATTERN.test(trimmed) && api !== undefined ? trimmed : "";
+    this.apiUrl = api ?? "";
+    contained(() => {
+      const url = pageUrl();
+      if (url !== undefined) {
+        this.notice(url);
       }
-    } catch {
-      this.advertiserKey = "";
-    }
+    });
   }
 
   /**
-   * Call on page load and whenever your consent manager reports a change.
-   * Granting consent releases buffered requests.
-   * Withdrawing consent pauses unsent requests; sent requests may complete.
-   * Does nothing on a server.
-   * @param granted - Whether the visitor consented to tracking.
+   * Passes on the visitor's consent for advertising
+   *
+   * Call it on every page load once your consent manager knows the answer,
+   * and again whenever it changes.
+   *
+   * @param granted - Whether the visitor consented
    */
   setCookieConsent(granted: boolean): void {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    try {
-      this.cookieConsent = granted === true;
-
-      if (!(this.cookieConsent && this.advertiserKey)) {
+    contained(() => {
+      const url = pageUrl();
+      if (url === undefined) {
         return;
       }
-
-      if (this.pendingIdentification) {
-        const body = this.identityBody();
-        this.pendingIdentification = false;
-        requestAdvertiser(
-          this.advertiserKey,
-          body,
-          "include",
-          "identify",
-          true
-        );
+      const previous = this.consent;
+      this.consent = granted === true ? "granted" : "denied";
+      if (previous === this.consent || !this.advertiserKey) {
+        return;
       }
-
-      this.sendPendingRequests();
-    } catch {
-      // A missing page URL must not break the host's consent callback.
-    }
-  }
-
-  /**
-   * Browsers remember identity; linking waits for cookie consent. Null clears
-   * browser identity and cancels unsent identification, preserving captured events.
-   * Servers send one identity immediately and never remember it for later calls.
-   * @param identity - A user ID or wallet; browsers also accept wallet arrays or null.
-   * @returns The HTTP status, or null for deferred identification or no response.
-   */
-  async identify(identity?: string | Address[] | null): Promise<number | null> {
-    try {
-      if (!this.advertiserKey || identity === undefined || identity === "") {
-        return null;
-      }
-
-      if (typeof window === "undefined") {
-        if (typeof identity !== "string") {
-          return null;
-        }
-
-        if (identity.startsWith("0x")) {
-          assertValidAddresses([identity as Address]);
-        }
-
-        return await requestAdvertiser(
-          this.advertiserKey,
-          { identity, source: "server" },
-          "omit",
-          "identify"
-        );
-      }
-
-      if (identity === null) {
-        this.userId = undefined;
-        this.identifiedAddresses.clear();
-        this.pendingIdentification = false;
-
-        return null;
-      }
-
-      if (typeof identity === "string" && !identity.startsWith("0x")) {
-        this.userId = identity;
+      if (this.consent === "granted") {
+        this.sendIdentify(url);
+        this.flush();
       } else {
-        const addresses = [identity].flat() as Address[];
-        assertValidAddresses(addresses);
-
-        if (addresses.length === 0) {
-          return null;
-        }
-
-        for (const address of addresses) {
-          this.identifiedAddresses.delete(address);
-          this.identifiedAddresses.add(address);
-        }
-
-        while (this.identifiedAddresses.size > MAX_WALLET_ADDRESSES) {
-          this.identifiedAddresses.delete(
-            this.identifiedAddresses.values().next().value as Address
-          );
-        }
+        this.held.splice(0);
       }
-
-      if (!this.cookieConsent) {
-        this.pendingIdentification = true;
-        return null;
-      }
-
-      return await requestAdvertiser(
-        this.advertiserKey,
-        this.identityBody(),
-        "include",
-        "identify",
-        true
-      );
-    } catch {
-      return null;
-    }
+    });
   }
 
   /**
-   * Later identity or URL changes never alter a captured event.
-   * Before consent, the snapshot stays in memory and is sent after consent.
-   * With consent, captures send directly without waiting for buffered events or identify.
-   * Servers require identity on every call and send immediately without cookies.
-   * @param name - The nonempty product event name.
-   * @param identity - A user ID or wallet for this event; required on a server.
-   * @param options - Optional server event URL; browsers use the current page URL.
-   * @returns The HTTP status, or null when buffered, rejected, or no response arrives.
+   * Identifies the visitor
+   *
+   * Call it when the visitor signs in or connects a wallet, and on every page
+   * load while they're signed in. Use the same user ID your server passes to
+   * capture(). Use your own ID, not an email address: IDs containing @ are
+   * ignored. In an array, anything that isn't an EVM wallet address, such as a
+   * Solana address, is skipped.
+   *
+   * @param walletOrUserId - Your user ID for the visitor, a wallet address, or an array of wallet addresses
    */
-  async capture(
-    name: string,
-    identity?: string,
-    options?: CaptureOptions
-  ): Promise<number | null> {
-    try {
+  identify(walletOrUserId: string | Address[]): void {
+    contained(() => {
+      const url = pageUrl();
+      if (url === undefined || !this.advertiserKey) {
+        return;
+      }
+      if (this.remember(walletOrUserId)) {
+        this.sendIdentify(url);
+      }
+    });
+  }
+
+  /**
+   * Forgets the visitor, such as when they sign out
+   */
+  reset(): void {
+    this.userId = undefined;
+    this.wallets.clear();
+    this.clickToken = undefined;
+    this.lastIdentify = undefined;
+  }
+
+  /**
+   * Records an event, such as a sign-up
+   *
+   * Call it once the action has succeeded.
+   *
+   * @param event - The event name, such as "signup"
+   */
+  capture(event: string): void {
+    contained(() => {
+      const url = pageUrl();
       if (
+        url === undefined ||
         !this.advertiserKey ||
-        typeof name !== "string" ||
-        name.length === 0
+        typeof event !== "string" ||
+        event.length === 0
       ) {
-        return null;
+        return;
       }
-
-      if (typeof window === "undefined") {
-        if (typeof identity !== "string" || identity.length === 0) {
-          return null;
-        }
-
-        if (identity.startsWith("0x")) {
-          assertValidAddresses([identity as Address]);
-        }
-
-        const url = options?.url;
-
-        if (url !== undefined && !URL.canParse(url)) {
-          return null;
-        }
-
-        return await requestAdvertiser(
-          this.advertiserKey,
-          {
-            events: [{ name, ...(url === undefined ? {} : { url }) }],
-            identity,
-            source: "server",
-          },
-          "omit",
-          "events"
-        );
+      const identity = this.snapshot(url);
+      const captured = { id: eventId(), name: event, url };
+      if (identifiesWithoutCookie(identity) || this.consent === "granted") {
+        this.sendEvents(identity, [captured]);
+      } else if (this.consent === "pending") {
+        this.hold(captured);
       }
-
-      const body = {
-        ...this.identityBody(identity),
-        events: [{ name, url: window.location.href }],
-      };
-
-      if (!this.cookieConsent) {
-        this.enqueue(body);
-        return null;
-      }
-
-      return await requestAdvertiser(
-        this.advertiserKey,
-        body,
-        "include",
-        "events",
-        true
-      );
-    } catch {
-      return null;
-    }
+    });
   }
 
-  private identityBody(identity?: string) {
-    const spclk = new URL(window.location.href).searchParams.get("spclk");
-    let { userId } = this;
-    let walletAddresses = [...this.identifiedAddresses];
-
-    if (identity !== undefined) {
-      if (typeof identity !== "string" || identity.length === 0) {
-        throw new Error("Supply a nonempty user ID or a valid wallet.");
-      }
-
-      if (identity.startsWith("0x")) {
-        assertValidAddresses([identity as Address]);
-        userId = undefined;
-        walletAddresses = [identity as Address];
-      } else {
-        userId = identity;
-        walletAddresses = [];
-      }
-    }
-
-    return {
-      cookieConsent: true,
-      ...(userId === undefined ? {} : { userId }),
-      source: "browser" as const,
-      ...(spclk === null ? {} : { spclk }),
-      walletAddresses,
-    };
-  }
-
-  private enqueue(body: PendingBatch["body"]): void {
-    const { events, ...context } = body;
-    const contextKey = JSON.stringify(context);
-    const lastBatchIndex = this.pendingBatches.length - 1;
-    const batch = this.pendingBatches[lastBatchIndex];
-
-    const combinedBody = batch && {
-      ...body,
-      events: [...batch.body.events, ...events],
-    };
-
+  private remember(walletOrUserId: string | Address[]): boolean {
     if (
-      batch?.contextKey === contextKey &&
-      combinedBody &&
-      combinedBody.events.length <= MAX_BATCH_EVENTS &&
-      new TextEncoder().encode(JSON.stringify(combinedBody)).byteLength <=
-        MAX_BODY_BYTES
+      typeof walletOrUserId === "string" &&
+      !walletOrUserId.startsWith("0x")
     ) {
-      batch.body = combinedBody;
-    } else {
-      this.pendingBatches.push({ body, contextKey });
+      if (!isUserId(walletOrUserId)) {
+        return false;
+      }
+      this.userId = walletOrUserId;
+      return true;
+    }
+    const addresses = ([walletOrUserId].flat() as Address[]).filter((address) =>
+      isWallet(address)
+    );
+    if (addresses.length === 0) {
+      return false;
+    }
+    for (const address of addresses) {
+      const wallet = address.toLowerCase() as Address;
+      this.wallets.delete(wallet);
+      this.wallets.add(wallet);
+    }
+    while (this.wallets.size > MAX_WALLET_ADDRESSES) {
+      this.wallets.delete(this.wallets.values().next().value as Address);
+    }
+    return true;
+  }
+
+  private notice(url: string): void {
+    const token = clickTokenIn(url);
+    if (token !== undefined) {
+      this.clickToken = token;
     }
   }
 
-  private sendPendingRequests(): void {
-    if (this.sending || !this.cookieConsent) {
+  private snapshot(url: string): Snapshot {
+    this.notice(url);
+    return {
+      ...(this.clickToken === undefined ? {} : { spclk: this.clickToken }),
+      ...(this.userId === undefined ? {} : { userId: this.userId }),
+      walletAddresses: [...this.wallets],
+    };
+  }
+
+  private attempt(body: object): Attempt {
+    const granted = this.consent === "granted";
+    return {
+      body: { cookieConsent: granted, source: "browser", ...body },
+      credentials: granted ? "include" : "omit",
+      keepalive: true,
+    };
+  }
+
+  private sendIdentify(url: string): void {
+    const identity = this.snapshot(url);
+    const identifiable =
+      identity.userId !== undefined ||
+      identity.walletAddresses.length > 0 ||
+      (this.consent === "granted" && identity.spclk !== undefined);
+    const { body, credentials } = this.attempt(identity);
+    const key = JSON.stringify([credentials, body]);
+    if (
+      !identifiable ||
+      key === this.lastIdentify ||
+      bodyBytes(body) > MAX_BODY_BYTES
+    ) {
       return;
     }
+    this.lastIdentify = key;
+    send(this.destination("identify"), () => this.attempt(identity));
+  }
 
-    // shift() removes and returns the oldest batch. Taking it out now keeps
-    // new captures from joining a batch whose request is already in flight.
-    const batch = this.pendingBatches.shift();
+  private sendEvents(
+    identity: Snapshot,
+    events: CapturedEvent[]
+  ): Promise<void> {
+    if (
+      bodyBytes(this.attempt({ ...identity, events }).body) > MAX_BODY_BYTES
+    ) {
+      return Promise.resolve();
+    }
+    return send(this.destination("events"), () =>
+      this.attempt({ ...identity, events })
+    );
+  }
+
+  private destination(operation: "events" | "identify") {
+    return {
+      advertiserKey: this.advertiserKey,
+      apiUrl: this.apiUrl,
+      operation,
+    };
+  }
+
+  private hold(event: CapturedEvent): void {
+    const lastIndex = this.held.length - 1;
+    const last = this.held[lastIndex];
+    if (
+      last &&
+      last.length < MAX_BATCH_EVENTS &&
+      bodyBytes(
+        this.attempt({ events: [...last, event], walletAddresses: [] }).body
+      ) <= MAX_BODY_BYTES
+    ) {
+      last.push(event);
+      return;
+    }
+    this.held.push([event]);
+  }
+
+  private flush(): void {
+    if (this.flushing) {
+      return;
+    }
+    const batch = this.held.shift();
     if (!batch) {
       return;
     }
-
-    this.sending = requestAdvertiser(
-      this.advertiserKey,
-      batch.body,
-      "include",
-      "events",
-      true
-    ).finally(() => {
-      this.sending = null;
-      this.sendPendingRequests();
-    });
+    this.flushing = this.sendEvents({ walletAddresses: [] }, batch).finally(
+      () => {
+        this.flushing = null;
+        this.flush();
+      }
+    );
   }
 }

@@ -1255,7 +1255,7 @@ describe("advertiser wizard", () => {
     ).resolves.toBe(1);
 
     expect(ui.record.join("\n")).toContain(
-      "https://docs.specify.sh/advertising/analytics-sdk-setup"
+      "https://docs.specify.sh/advertising/javascript"
     );
   });
 });

@@ -161,7 +161,7 @@ describe("advertiser prompts", () => {
     const prompt = reconPrompt(ADVERTISER_DOCS, "advertiser");
 
     expect(prompt).toContain(
-      "https://docs.specify.sh/advertising/analytics-sdk-setup.md"
+      "https://docs.specify.sh/advertising/javascript.md"
     );
     expect(prompt).toContain(
       "follow the import paths, names and options exactly"

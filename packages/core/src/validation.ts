@@ -1,5 +1,5 @@
-import { ValidationError } from "./errors";
-import type { Address } from "./types";
+import { ValidationError } from "./errors.js";
+import type { Address } from "./types.js";
 
 const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 

@@ -15,7 +15,7 @@ Client libraries for [Specify](https://specify.sh), the ad network for onchain a
 - [Publisher browser SDK reference](https://docs.specify.sh/publishing/sdk-browser)
 - [Publisher Node.js SDK reference](https://docs.specify.sh/publishing/sdk-server)
 - [Publisher SDK migration from v0.4.x](https://docs.specify.sh/publishing/migrating-from-v0-4)
-- [Advertiser SDK setup](https://docs.specify.sh/advertising/analytics-sdk-setup)
+- [Advertiser SDK: track conversions](https://docs.specify.sh/advertising/track-conversions)
 
 ## Development
 

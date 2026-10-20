@@ -1,20 +1,20 @@
-import { ValidationError as CoreValidationError } from "./errors";
+import { ValidationError as CoreValidationError } from "./errors.js";
 import {
   type AdRequest as CoreAdRequest,
   requestAd as coreRequestAd,
-} from "./request";
+} from "./request.js";
 import {
   type Address as CoreAddress,
   ImageFormat as CoreImageFormat,
   type ImageFormat as CoreImageFormatType,
   type SpecifyAd as CoreSpecifyAd,
-} from "./types";
+} from "./types.js";
 import {
   MAX_WALLET_ADDRESSES as CORE_MAX_WALLET_ADDRESSES,
   assertValidAddresses as coreAssertValidAddresses,
   assertValidPublisherKey as coreAssertValidPublisherKey,
   prepareWalletAddresses as corePrepareWalletAddresses,
-} from "./validation";
+} from "./validation.js";
 
 export type AdRequest = CoreAdRequest;
 export type Address = CoreAddress;

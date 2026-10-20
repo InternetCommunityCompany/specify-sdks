@@ -47,6 +47,6 @@ The wizard never asks for your key, so it never handles one. The agent writes a 
 
 Whichever of these is on your `PATH`: Claude Code, Codex, Cursor, Gemini CLI, opencode, Goose, Cline, Kilo Code, Antigravity, pi. Detection comes from [AnyAgent](https://www.npmjs.com/package/anyagent-js).
 
-**Manual setup: [Publisher](https://docs.specify.sh/publishing/get-started) · [Advertiser](https://docs.specify.sh/advertising/analytics-sdk-setup)**
+**Manual setup: [Publisher](https://docs.specify.sh/publishing/get-started) · [Advertiser](https://docs.specify.sh/advertising/javascript)**
 
 MIT © The Internet Community Company
