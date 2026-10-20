@@ -6,6 +6,8 @@ const KEY = "sak_0123456789abcdef0123456789abcd";
 const WALLET_A = "0x1111111111111111111111111111111111111111";
 const WALLET_B = "0x2222222222222222222222222222222222222222";
 const MIXED_CASE = "0xAbCdEf0000000000000000000000000000000000";
+// The wrapped SOL mint, standing in for the Solana wallets sites pass along.
+const SOLANA_ADDRESS = "So11111111111111111111111111111111111111112";
 
 function mockService() {
   return vi
@@ -318,7 +320,7 @@ describe("advertiser browser client", () => {
       "someone@example.com",
       "x".repeat(257),
       "0xbroken",
-      ["0xbroken", WALLET_A],
+      ["0xbroken", SOLANA_ADDRESS],
       [],
     ]) {
       client.identify(invalid as string);
@@ -330,6 +332,18 @@ describe("advertiser browser client", () => {
       userId: "customer",
       walletAddresses: [],
     });
+  });
+
+  it("keeps the wallets from an array that mixes in other addresses", async () => {
+    const fetchSpy = mockService();
+    new Specify({ advertiserKey: KEY }).identify([
+      SOLANA_ADDRESS,
+      WALLET_A,
+      "0xbroken",
+    ] as `0x${string}`[]);
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(requests(fetchSpy)[0]?.body.walletAddresses).toEqual([WALLET_A]);
   });
 
   it("replaces the user ID, adds lowercased wallets, and keeps the 50 most recent", async () => {

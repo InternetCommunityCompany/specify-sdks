@@ -146,7 +146,8 @@ export default class Specify {
    * Call it when the visitor signs in or connects a wallet, and on every page
    * load while they're signed in. Use the same user ID your server passes to
    * capture(). Use your own ID, not an email address: IDs containing @ are
-   * ignored.
+   * ignored. In an array, anything that isn't an EVM wallet address, such as a
+   * Solana address, is skipped.
    *
    * @param walletOrUserId - Your user ID for the visitor, a wallet address, or an array of wallet addresses
    */
@@ -211,11 +212,10 @@ export default class Specify {
       this.userId = walletOrUserId;
       return true;
     }
-    const addresses = [walletOrUserId].flat() as Address[];
+    const addresses = ([walletOrUserId].flat() as Address[]).filter((address) =>
+      isWallet(address)
+    );
     if (addresses.length === 0) {
-      return false;
-    }
-    if (!addresses.every((address) => isWallet(address))) {
       return false;
     }
     for (const address of addresses) {
