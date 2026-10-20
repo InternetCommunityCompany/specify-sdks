@@ -81,7 +81,7 @@ describe("runCli", () => {
     { argv: [], guide: "https://docs.specify.sh/publishing/get-started" },
     {
       argv: ["--advertiser"],
-      guide: "https://docs.specify.sh/advertising/analytics-sdk-setup",
+      guide: "https://docs.specify.sh/advertising/javascript",
     },
   ])(
     "names the manual guide when stdin is not a terminal ($argv)",
