@@ -9,15 +9,14 @@ import {
 import {
   distinctWalletAddresses,
   INVALID_PUBLISHER_KEY_MESSAGE,
-  INVALID_WALLET_ADDRESS_MESSAGE,
   LONG_WALLET_ADDRESS,
   LOWER_CASE_WALLET_ADDRESS,
   MIXED_CASE_WALLET_ADDRESS,
   SHORT_WALLET_ADDRESS,
+  SOLANA_ADDRESS,
   UNPREFIXED_MOCK_PUBLISHER_KEY,
   VALID_MOCK_PUBLISHER_KEY,
   VALID_MOCK_WALLET_ADDRESS,
-  WALLET_ADDRESS_LIMIT_MESSAGE,
 } from "./consts";
 import { setupMockFetch } from "./helpers";
 
@@ -91,33 +90,33 @@ describe("serve", () => {
     });
   });
 
-  it.each([
-    ["mixed case", MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
-    ["lowercase", LOWER_CASE_WALLET_ADDRESS, MIXED_CASE_WALLET_ADDRESS],
-  ])(
-    "sends a case-duplicated address once, in the %s given first",
-    async (_label, first, second) => {
-      const { requests } = setupMockFetch(mockAd);
+  it("sends case variants of an address once, lowercased", async () => {
+    const { requests } = setupMockFetch(mockAd);
 
-      await serve(options([first, second]));
+    await serve(
+      options([MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS])
+    );
 
-      expect(requestBody(requests[0] ?? {})).toMatchObject({
-        walletAddresses: [first],
-      });
-    }
-  );
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: [LOWER_CASE_WALLET_ADDRESS],
+    });
+  });
 
   it("counts case variants as one address toward the limit", async () => {
     const { requests } = setupMockFetch(mockAd);
-    const addresses = [
-      ...distinctWalletAddresses(49),
-      MIXED_CASE_WALLET_ADDRESS,
-      LOWER_CASE_WALLET_ADDRESS,
-    ];
+    const distinct = distinctWalletAddresses(49);
 
-    await expect(serve(options(addresses))).resolves.toEqual(mockAd);
+    await expect(
+      serve(
+        options([
+          ...distinct,
+          MIXED_CASE_WALLET_ADDRESS,
+          LOWER_CASE_WALLET_ADDRESS,
+        ])
+      )
+    ).resolves.toEqual(mockAd);
     expect(requestBody(requests[0] ?? {})).toMatchObject({
-      walletAddresses: addresses.slice(0, 50),
+      walletAddresses: [...distinct, LOWER_CASE_WALLET_ADDRESS],
     });
   });
 
@@ -173,17 +172,33 @@ describe("serve", () => {
   });
 
   it.each([
-    ["without the 0x prefix", "invalid_address" as Address],
-    ["with non-hex characters", "0xinvalid" as Address],
-    ["with 39 hex digits", SHORT_WALLET_ADDRESS],
-    ["with 41 hex digits", LONG_WALLET_ADDRESS],
-  ])("rejects an address %s before requesting", async (_label, address) => {
+    ["a Solana address", SOLANA_ADDRESS],
+    ["an address without the 0x prefix", "invalid_address" as Address],
+    ["an address with non-hex characters", "0xinvalid" as Address],
+    ["an address with 39 hex digits", SHORT_WALLET_ADDRESS],
+    ["an address with 41 hex digits", LONG_WALLET_ADDRESS],
+    [
+      "an address wrapped in an array",
+      [LOWER_CASE_WALLET_ADDRESS] as unknown as Address,
+    ],
+  ])("skips %s and serves with the rest", async (_label, address) => {
+    const { requests } = setupMockFetch(mockAd);
+
+    await expect(
+      serve(options([address, VALID_MOCK_WALLET_ADDRESS]))
+    ).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+    });
+  });
+
+  it("returns null without a request when no address is an EVM wallet address", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
 
-    await expect(serve(options([address]))).rejects.toThrow(
-      new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE)
-    );
+    await expect(
+      serve(options([SOLANA_ADDRESS, "0xinvalid" as Address]))
+    ).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -197,14 +212,14 @@ describe("serve", () => {
     });
   });
 
-  it("rejects more than 50 unique addresses before requesting", async () => {
-    const fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
+  it("sends the first 50 of more than 50 distinct addresses", async () => {
+    const { requests } = setupMockFetch(mockAd);
+    const addresses = distinctWalletAddresses(51);
 
-    await expect(serve(options(distinctWalletAddresses(51)))).rejects.toThrow(
-      new ValidationError(WALLET_ADDRESS_LIMIT_MESSAGE)
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(serve(options(addresses))).resolves.toEqual(mockAd);
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      walletAddresses: addresses.slice(0, 50),
+    });
   });
 
   it("returns null for 204 without parsing the body", async () => {

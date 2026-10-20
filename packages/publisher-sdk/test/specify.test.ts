@@ -9,15 +9,14 @@ import Specify, {
 import {
   distinctWalletAddresses,
   INVALID_PUBLISHER_KEY_MESSAGE,
-  INVALID_WALLET_ADDRESS_MESSAGE,
   LONG_WALLET_ADDRESS,
   LOWER_CASE_WALLET_ADDRESS,
   MIXED_CASE_WALLET_ADDRESS,
   SHORT_WALLET_ADDRESS,
+  SOLANA_ADDRESS,
   UNPREFIXED_MOCK_PUBLISHER_KEY,
   VALID_MOCK_PUBLISHER_KEY,
   VALID_MOCK_WALLET_ADDRESS,
-  WALLET_ADDRESS_LIMIT_MESSAGE,
 } from "./consts";
 import { setupMockFetch } from "./helpers";
 
@@ -157,39 +156,33 @@ describe("Specify", () => {
       });
     });
 
-    it.each([
-      ["mixed case", MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
-      ["lowercase", LOWER_CASE_WALLET_ADDRESS, MIXED_CASE_WALLET_ADDRESS],
-    ])(
-      "sends a case-duplicated address once, in the %s given first",
-      async (_label, first, second) => {
-        const specify = createSpecify();
-        const { requests } = setupMockFetch(mockAd);
+    it("sends case variants of an address once, lowercased", async () => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
 
-        await specify.serve([first, second], {
-          imageFormat: ImageFormat.LANDSCAPE,
-        });
+      await specify.serve(
+        [MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
+        { imageFormat: ImageFormat.LANDSCAPE }
+      );
 
-        expect(requestBody(requests[0] ?? {})).toMatchObject({
-          walletAddresses: [first],
-        });
-      }
-    );
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [LOWER_CASE_WALLET_ADDRESS],
+      });
+    });
 
     it("counts case variants as one address toward the limit", async () => {
       const specify = createSpecify();
       const { requests } = setupMockFetch(mockAd);
-      const addresses = [
-        ...distinctWalletAddresses(49),
-        MIXED_CASE_WALLET_ADDRESS,
-        LOWER_CASE_WALLET_ADDRESS,
-      ];
+      const distinct = distinctWalletAddresses(49);
 
       await expect(
-        specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE })
+        specify.serve(
+          [...distinct, MIXED_CASE_WALLET_ADDRESS, LOWER_CASE_WALLET_ADDRESS],
+          { imageFormat: ImageFormat.LANDSCAPE }
+        )
       ).resolves.toEqual(mockAd);
       expect(requestBody(requests[0] ?? {})).toMatchObject({
-        walletAddresses: addresses.slice(0, 50),
+        walletAddresses: [...distinct, LOWER_CASE_WALLET_ADDRESS],
       });
     });
 
@@ -211,23 +204,39 @@ describe("Specify", () => {
     });
 
     it.each([
-      ["without the 0x prefix", "invalid_address" as Address],
-      ["with non-hex characters", "0xinvalid" as Address],
-      ["with 39 hex digits", SHORT_WALLET_ADDRESS],
-      ["with 41 hex digits", LONG_WALLET_ADDRESS],
-    ])(
-      "throws ValidationError for an address %s before requesting",
-      async (_label, address) => {
-        const specify = createSpecify();
-        const fetchMock = vi.fn();
-        globalThis.fetch = fetchMock;
+      ["a Solana address", SOLANA_ADDRESS],
+      ["an address without the 0x prefix", "invalid_address" as Address],
+      ["an address with non-hex characters", "0xinvalid" as Address],
+      ["an address with 39 hex digits", SHORT_WALLET_ADDRESS],
+      ["an address with 41 hex digits", LONG_WALLET_ADDRESS],
+      [
+        "an address wrapped in an array",
+        [LOWER_CASE_WALLET_ADDRESS] as unknown as Address,
+      ],
+    ])("skips %s and serves with the rest", async (_label, address) => {
+      const specify = createSpecify();
+      const { requests } = setupMockFetch(mockAd);
 
-        await expect(
-          specify.serve(address, { imageFormat: ImageFormat.LANDSCAPE })
-        ).rejects.toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
-        expect(fetchMock).not.toHaveBeenCalled();
-      }
-    );
+      await expect(
+        specify.serve([address, VALID_MOCK_WALLET_ADDRESS], {
+          imageFormat: ImageFormat.LANDSCAPE,
+        })
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+      });
+    });
+
+    it("returns null without a request when no address is an EVM wallet address and there is no consent", async () => {
+      const specify = createSpecify();
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+
+      await expect(
+        specify.serve(SOLANA_ADDRESS, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
 
     it("returns null without a request for an empty address array without consent", async () => {
       const specify = createSpecify();
@@ -253,17 +262,17 @@ describe("Specify", () => {
       });
     });
 
-    it("throws ValidationError for more than 50 unique addresses before requesting", async () => {
+    it("sends the first 50 of more than 50 distinct addresses", async () => {
       const specify = createSpecify();
-      const fetchMock = vi.fn();
-      globalThis.fetch = fetchMock;
+      const { requests } = setupMockFetch(mockAd);
+      const addresses = distinctWalletAddresses(51);
 
       await expect(
-        specify.serve(distinctWalletAddresses(51), {
-          imageFormat: ImageFormat.LANDSCAPE,
-        })
-      ).rejects.toThrow(new ValidationError(WALLET_ADDRESS_LIMIT_MESSAGE));
-      expect(fetchMock).not.toHaveBeenCalled();
+        specify.serve(addresses, { imageFormat: ImageFormat.LANDSCAPE })
+      ).resolves.toEqual(mockAd);
+      expect(requestBody(requests[0] ?? {})).toMatchObject({
+        walletAddresses: addresses.slice(0, 50),
+      });
     });
 
     it.each([400, 401, 404, 500, 502, 503])(
@@ -521,18 +530,17 @@ describe("Specify", () => {
         });
       });
 
-      it("sends a case-duplicated address once, in the caller's casing", async () => {
+      it("sends a registered address and its case variant once", async () => {
         const specify = createSpecify();
         const { requests } = setupMockFetch(mockAd);
-        const checksummed = `0x${"AbCd".repeat(10)}` as Address;
 
-        specify.identify(checksummed.toLowerCase() as Address);
-        await specify.serve(checksummed, {
+        specify.identify(MIXED_CASE_WALLET_ADDRESS);
+        await specify.serve(LOWER_CASE_WALLET_ADDRESS, {
           imageFormat: ImageFormat.LANDSCAPE,
         });
 
         expect(requestBody(requests[0] ?? {})).toMatchObject({
-          walletAddresses: [checksummed],
+          walletAddresses: [LOWER_CASE_WALLET_ADDRESS],
         });
       });
 
@@ -548,21 +556,20 @@ describe("Specify", () => {
         expect(fetchMock).not.toHaveBeenCalled();
       });
 
-      it("registers nothing from a call with a malformed address", async () => {
+      it("registers the EVM wallet addresses from a call that mixes in others", async () => {
         const specify = createSpecify();
-        const fetchMock = vi.fn();
-        globalThis.fetch = fetchMock;
+        const { requests } = setupMockFetch(mockAd);
 
-        expect(() =>
-          specify.identify([
-            VALID_MOCK_WALLET_ADDRESS,
-            "not-an-address" as Address,
-          ])
-        ).toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
-        await expect(
-          specify.serve({ imageFormat: ImageFormat.LANDSCAPE })
-        ).resolves.toBeNull();
-        expect(fetchMock).not.toHaveBeenCalled();
+        specify.identify([
+          SOLANA_ADDRESS,
+          VALID_MOCK_WALLET_ADDRESS,
+          "0xinvalid" as Address,
+        ]);
+        await specify.serve({ imageFormat: ImageFormat.LANDSCAPE });
+
+        expect(requestBody(requests[0] ?? {})).toMatchObject({
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        });
       });
 
       it("keeps the 50 most recent registrations", async () => {
@@ -734,17 +741,12 @@ describe("Specify", () => {
         expect(listener).toHaveBeenCalledTimes(1);
       });
 
-      it("produces no callback for a batch containing a malformed address", async () => {
+      it("produces no callback for a batch with no EVM wallet address", async () => {
         const specify = createSpecify();
         const listener = vi.fn();
 
         specify.onIdentityChange(listener);
-        expect(() =>
-          specify.identify([
-            VALID_MOCK_WALLET_ADDRESS,
-            "not-an-address" as Address,
-          ])
-        ).toThrow(new ValidationError(INVALID_WALLET_ADDRESS_MESSAGE));
+        specify.identify([SOLANA_ADDRESS, "0xinvalid" as Address]);
         await nextMacrotask();
 
         expect(listener).not.toHaveBeenCalled();
@@ -904,19 +906,17 @@ describe("Specify", () => {
         expect(listener).not.toHaveBeenCalled();
       });
 
-      it("fires for a case variant of an already-registered address", async () => {
+      it("does not fire for a case variant of an already-registered address", async () => {
         const specify = createSpecify();
         const listener = vi.fn();
-        const lower = `0x${"ab".repeat(20)}` as Address;
-        const upper = `0x${"AB".repeat(20)}` as Address;
 
-        specify.identify(lower);
+        specify.identify(LOWER_CASE_WALLET_ADDRESS);
         await nextMacrotask();
         specify.onIdentityChange(listener);
-        specify.identify(upper);
+        specify.identify(MIXED_CASE_WALLET_ADDRESS);
         await nextMacrotask();
 
-        expect(listener).toHaveBeenCalledTimes(1);
+        expect(listener).not.toHaveBeenCalled();
       });
 
       it("notifies once more when a listener registers a new address during the flush", async () => {

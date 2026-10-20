@@ -23,21 +23,14 @@ export function assertValidAddresses(addresses: Address[]): void {
   }
 }
 
+// Sites pass addresses from other chains, such as Solana, alongside EVM ones,
+// and those must not cost the visitor an ad, so they are skipped.
 export function prepareWalletAddresses(addresses: Address[]): Address[] {
-  assertValidAddresses(addresses);
-  // Letter case is only a checksum, so case variants are one wallet. Keeping
-  // the first casing matches what the browser client sends.
-  const seen = new Set<string>();
-  const uniqueAddresses = addresses.filter((address) => {
-    const key = address.toLowerCase();
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-  if (uniqueAddresses.length > MAX_WALLET_ADDRESSES) {
-    throw new ValidationError("Maximum 50 wallet addresses allowed");
-  }
-  return uniqueAddresses;
+  const wallets = addresses
+    .filter(
+      (address) => typeof address === "string" && ADDRESS_PATTERN.test(address)
+    )
+    // Letter case is only a checksum, so case variants are one wallet.
+    .map((address) => address.toLowerCase() as Address);
+  return [...new Set(wallets)];
 }

@@ -12,11 +12,11 @@ export const LOWER_CASE_WALLET_ADDRESS =
 
 export const SHORT_WALLET_ADDRESS: Address = `0x${"a".repeat(39)}`;
 export const LONG_WALLET_ADDRESS: Address = `0x${"a".repeat(41)}`;
+// The wrapped SOL mint, standing in for the Solana wallets sites pass along.
+export const SOLANA_ADDRESS =
+  "So11111111111111111111111111111111111111112" as Address;
 
 export const INVALID_PUBLISHER_KEY_MESSAGE = "Invalid publisher key format";
-export const INVALID_WALLET_ADDRESS_MESSAGE = "Invalid wallet address format";
-export const WALLET_ADDRESS_LIMIT_MESSAGE =
-  "Maximum 50 wallet addresses allowed";
 
 export function distinctWalletAddresses(count: number): Address[] {
   return Array.from(

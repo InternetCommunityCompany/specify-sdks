@@ -1,10 +1,14 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Specify, { type Address, ImageFormat, type SpecifyAd } from "../src";
 import { useSpecifyAd } from "../src/react";
-import { VALID_MOCK_PUBLISHER_KEY, VALID_MOCK_WALLET_ADDRESS } from "./consts";
+import {
+  SOLANA_ADDRESS,
+  VALID_MOCK_PUBLISHER_KEY,
+  VALID_MOCK_WALLET_ADDRESS,
+} from "./consts";
 
 const OTHER_MOCK_WALLET_ADDRESS = `0x${"ab".repeat(20)}` as Address;
 
@@ -370,36 +374,15 @@ describe.runIf(typeof window !== "undefined")("useSpecifyAd", () => {
     });
   });
 
-  it("leaves the slot empty when an address is malformed instead of throwing", async () => {
+  it.each([
+    ["a Solana address", SOLANA_ADDRESS],
+    ["a malformed 0x address", "0xinvalid" as Address],
+  ])("skips %s and fills the slot", async (_label, address) => {
     const specify = createSpecify();
-    specify.setCookieConsent(true);
-    const { fetch } = setupServeQueue([adResponse(mockAd)]);
-    const unhandledRejection = vi.fn();
-    process.on("unhandledRejection", unhandledRejection);
-    onTestFinished(() => {
-      process.off("unhandledRejection", unhandledRejection);
-    });
-
-    const { result } = renderHook(() =>
-      useSpecifyAd("0xinvalid" as Address, {
-        imageFormat: ImageFormat.LANDSCAPE,
-        specify,
-      })
-    );
-
-    await flushServes();
-    expect(result.current).toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
-    expect(unhandledRejection).not.toHaveBeenCalled();
-  });
-
-  it("drops a value without the 0x prefix and serves without it", async () => {
-    const specify = createSpecify();
-    specify.setCookieConsent(true);
     const { fetch, requests } = setupServeQueue([adResponse(mockAd)]);
 
     const { result } = renderHook(() =>
-      useSpecifyAd("not-an-address" as Address, {
+      useSpecifyAd([address, VALID_MOCK_WALLET_ADDRESS], {
         imageFormat: ImageFormat.LANDSCAPE,
         specify,
       })
@@ -408,7 +391,7 @@ describe.runIf(typeof window !== "undefined")("useSpecifyAd", () => {
     await waitFor(() => expect(result.current).toEqual(mockAd));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(requestBody(requests[0] ?? {})).toMatchObject({
-      walletAddresses: [],
+      walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
     });
   });
 

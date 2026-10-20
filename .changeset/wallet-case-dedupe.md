@@ -3,4 +3,4 @@
 "@specify-sh/publisher-sdk": patch
 ---
 
-Wallet addresses that differ only in letter case, such as a checksummed address and its lowercase form, now count as one wallet in `serve()` from `@specify-sh/publisher-sdk/server`. The wallet is sent once, in the casing you passed first, and counts once toward the 50-address limit, matching what the browser client already sent. In the browser, `serve(addresses, options)` no longer throws `ValidationError` for a list that goes over 50 only because of such duplicates.
+Wallet addresses that differ only in letter case, such as a checksummed address and its lowercase form, now count as one wallet everywhere, including `serve()` from `@specify-sh/publisher-sdk/server`. Such a wallet is sent once and counts once toward the 50-address limit. Registering a case variant of an address already passed to `identify()` no longer runs the `onIdentityChange` listeners.

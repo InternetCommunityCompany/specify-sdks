@@ -1,5 +1,4 @@
 import {
-  assertValidAddresses,
   assertValidPublisherKey,
   type Address as CoreAddress,
   ImageFormat as CoreImageFormat,
@@ -56,26 +55,6 @@ function resolveServeArgs(
     );
   }
   return { addresses: first, options: second };
-}
-
-function mergeIdentified(
-  provided: Address[],
-  identifiedNewestFirst: Address[]
-): Address[] {
-  const seen = new Set<string>();
-  const merged: Address[] = [];
-  for (const address of [...provided, ...identifiedNewestFirst]) {
-    const key = address.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    merged.push(address);
-    if (merged.length === MAX_WALLET_ADDRESSES) {
-      break;
-    }
-  }
-  return merged;
 }
 
 /**
@@ -143,18 +122,19 @@ export default class Specify {
    *
    * Call it when the user connects a wallet. Registering merges and never
    * removes, so a disconnect does not retract an address, and the 50 most
-   * recently registered are kept. Does nothing outside a browser, such as
-   * during a server render.
+   * recently registered are kept. Anything that isn't an EVM wallet address,
+   * such as a Solana address, is skipped. Does nothing outside a browser, such
+   * as during a server render.
    *
    * @param addressOrAddresses - One address, an array of them, or nothing
-   * @throws {ValidationError} In a browser, when any address in the batch is malformed. Nothing from that call is registered.
    */
   identify(addressOrAddresses: Address | Address[] | undefined | null): void {
     if (typeof window === "undefined") {
       return;
     }
-    const addresses = toAddressArray(addressOrAddresses);
-    assertValidAddresses(addresses);
+    const addresses = prepareWalletAddresses(
+      toAddressArray(addressOrAddresses)
+    );
     let gainedAddress = false;
     for (const address of addresses) {
       if (!this.identifiedAddresses.has(address)) {
@@ -238,13 +218,15 @@ export default class Specify {
    * Serves an ad to the given wallet address or addresses
    *
    * These go out ahead of anything registered through identify(), and at most
-   * 50 addresses are sent in total.
+   * 50 addresses are sent in total. Anything that isn't an EVM wallet address,
+   * such as a Solana address, is skipped, and addresses that differ only in
+   * letter case count once.
    *
    * @param addressOrAddresses - One address, an array of them, or nothing to rely on identify() and consent alone
    * @param options - How to serve this placement
    * @param options.imageFormat - The image format to request
    * @param options.adUnitId - Your own id for this placement, so you can compare placements in reporting
-   * @throws {ValidationError} When an address is malformed, or more than 50 different ones are passed here. Addresses that differ only in letter case count once.
+   * @throws {ValidationError} When called without options
    * @returns An ad, or null for no ad, an API failure, or a network failure
    */
   serve(
@@ -256,13 +238,10 @@ export default class Specify {
     second?: ServeOptions
   ): Promise<SpecifyAd | null> {
     const { addresses, options } = resolveServeArgs(first, second);
-    const providedAddresses = toAddressArray(addresses);
-    const uniqueProvided = prepareWalletAddresses(providedAddresses);
-
-    const walletAddresses = mergeIdentified(
-      uniqueProvided,
-      [...this.identifiedAddresses].reverse()
-    );
+    const walletAddresses = prepareWalletAddresses([
+      ...toAddressArray(addresses),
+      ...[...this.identifiedAddresses].reverse(),
+    ]).slice(0, MAX_WALLET_ADDRESSES);
 
     if (walletAddresses.length === 0 && !this.cookieConsent) {
       return null;
