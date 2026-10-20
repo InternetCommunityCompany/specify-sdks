@@ -29,6 +29,8 @@ const TURN_ERROR =
   "The coding agent could not complete the request. Check its authentication and try again.";
 const STOPPED_MID_RUN =
   "Stopped. The agent may already have changed files, so check git status.";
+const UNFINISHED_CHANGES =
+  "\nThe agent did not finish, so these changes may be incomplete.";
 
 const AGENT: DetectedAgent = { id: "codex", name: "Codex", version: "1.2.3" };
 const PUBLISHER_HERO = "app/page.tsx - the hero, above the fold";
@@ -847,7 +849,7 @@ describe("runWizard (publisher)", () => {
     expect(seam.closes).toBe(1);
   });
 
-  it("fails at exit code 1 when the write turn fails, without saying what it changed", async () => {
+  it("fails at exit code 1 when the write turn fails, and says what it changed", async () => {
     const cwd = repository();
     const seam = fakeSeam({
       onWork: (opts) => {
@@ -877,7 +879,43 @@ describe("runWizard (publisher)", () => {
       "Write the changes failed: stopped after 2 steps, 1 file"
     );
     expect(seam.closes).toBe(1);
-    expect(ui.record).toEqual([TURN_ERROR]);
+    expect(ui.record).toEqual([
+      "Changes\nNew files, not yet tracked by Git:\nlib/specify.ts",
+      UNFINISHED_CHANGES,
+      TURN_ERROR,
+    ]);
+  });
+
+  it("says what a write turn changed before the developer stopped it", async () => {
+    const cwd = repository();
+    const stopping = new AbortController();
+    const seam = fakeSeam({
+      onWork: () => {
+        writeFileSync(join(cwd, "specify.ts"), "// half a client\n");
+        stopping.abort();
+      },
+      plans: [PUBLISHER_PLAN_WITHOUT_PLACEMENTS],
+      workError: new Error(TURN_ERROR),
+    });
+    const ui = fakeUi({ review: ["approve"] });
+
+    await expect(
+      runWizard({
+        cwd,
+        fetchImpl: docsFetch(),
+        mode: "publisher",
+        seam,
+        signal: stopping.signal,
+        ui,
+      })
+    ).resolves.toBe(0);
+
+    expect(ui.finished).toContain("Write the changes failed: stopped");
+    expect(ui.record).toEqual([
+      "Changes\nNew files, not yet tracked by Git:\nspecify.ts",
+      UNFINISHED_CHANGES,
+      STOPPED_MID_RUN,
+    ]);
   });
 
   it("names the cause of a failure only when asked to be verbose", async () => {
@@ -981,6 +1019,8 @@ describe("the agent session", () => {
     ).resolves.toBe(0);
 
     expect(ui.shown).toContain(message);
+    // The screen it was shown on is gone once the wizard exits.
+    expect(ui.record).toContain(message);
     expect(ui.record.join("\n")).toContain(
       "Read the changes, then run your app."
     );

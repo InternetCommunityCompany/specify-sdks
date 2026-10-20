@@ -42,6 +42,8 @@ const WRITE_STEP = 4;
 const NOTHING_CHANGED = "Stopped. Nothing was changed.";
 const STOPPED_MID_RUN =
   "Stopped. The agent may already have changed files, so check git status.";
+const UNFINISHED_CHANGES =
+  "\nThe agent did not finish, so these changes may be incomplete.";
 
 export interface WizardOptions {
   cwd: string;
@@ -314,12 +316,12 @@ async function closeQuietly(
   try {
     await conversation.close();
   } catch (error) {
-    ui.warn([
-      messageOf(
-        error,
-        "The coding agent session did not close cleanly. Check that it is not still running."
-      ),
-    ]);
+    const message = messageOf(
+      error,
+      "The coding agent session did not close cleanly. Check that it is not still running."
+    );
+    ui.warn([message]);
+    ui.keep(message);
   }
 }
 
@@ -401,7 +403,14 @@ async function wizard(options: WizardOptions): Promise<number> {
     // The opening contract has been read and acted on by now.
     ui.clear();
     ui.begin(WRITE_STEP);
-    await implement(context, approved, docs);
+    try {
+      await implement(context, approved, docs);
+    } catch (error) {
+      // The turn may have written files before it ended.
+      await reportChanges(cwd, tree, ui);
+      ui.keep(UNFINISHED_CHANGES);
+      throw error;
+    }
     ui.finish(WRITE_STEP);
   } finally {
     await closeQuietly(conversation, ui);
