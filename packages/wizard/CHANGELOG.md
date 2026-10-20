@@ -1,5 +1,17 @@
 # @specify-sh/wizard
 
+## 0.3.1
+
+### Patch Changes
+
+- 8639db8: Advertiser setup now points to the advertiser SDK guides for 1.0.
+- 131c3a5: Show the project path correctly when its directory name starts with your home directory's. With the home directory `/home/dev`, a project in `/home/dev2/app` was shown as `~2/app`.
+  
+  Ctrl-C now stops the wizard while it loads the Specify documentation, and a stalled connection gives up after 30 seconds instead of holding the wizard for up to five minutes. The wizard now needs Node.js 20.3 or later.
+- 131c3a5: When the coding agent fails or is stopped while writing the changes, the wizard now lists the files it changed before it ended, so you know what to review or undo.
+  
+  A warning that the coding agent session did not close is now printed after the wizard exits. Before, it appeared only on the wizard's screen, which closes straight after.
+
 ## 0.3.0
 
 ### Minor Changes
