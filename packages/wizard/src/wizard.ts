@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { sep } from "node:path";
 import type {
   AgentActivity,
   AgentConversation,
@@ -38,8 +39,11 @@ const TREE_STEP = 1;
 const READ_STEP = 2;
 const REVIEW_STEP = 3;
 const WRITE_STEP = 4;
+const NOTHING_CHANGED = "Stopped. Nothing was changed.";
 const STOPPED_MID_RUN =
   "Stopped. The agent may already have changed files, so check git status.";
+const UNFINISHED_CHANGES =
+  "\nThe agent did not finish, so these changes may be incomplete.";
 
 export interface WizardOptions {
   cwd: string;
@@ -96,7 +100,10 @@ function describeAgent(agent: DetectedAgent): string {
 /** A path the developer recognises, rather than one that eats the line. */
 function shorten(cwd: string): string {
   const home = homedir();
-  return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+  // A bare prefix check would turn /home/dev2 into ~2 for the home /home/dev.
+  const inside =
+    home !== "" && (cwd === home || cwd.startsWith(`${home}${sep}`));
+  return inside ? `~${cwd.slice(home.length)}` : cwd;
 }
 
 function contract(ui: Ui, agent: DetectedAgent): void {
@@ -150,7 +157,7 @@ async function confirmTree(tree: TreeState, ui: Ui): Promise<string> {
   }
   ui.warn([warning]);
   if (!(await ui.confirm("Continue anyway?"))) {
-    throw new WizardStop("Stopped. Nothing was changed.");
+    throw new WizardStop(NOTHING_CHANGED);
   }
   return tree.kind === "dirty" ? `${tree.changedFiles} changed` : "not a repo";
 }
@@ -309,12 +316,12 @@ async function closeQuietly(
   try {
     await conversation.close();
   } catch (error) {
-    ui.warn([
-      messageOf(
-        error,
-        "The coding agent session did not close cleanly. Check that it is not still running."
-      ),
-    ]);
+    const message = messageOf(
+      error,
+      "The coding agent session did not close cleanly. Check that it is not still running."
+    );
+    ui.warn([message]);
+    ui.keep(message);
   }
 }
 
@@ -366,7 +373,15 @@ async function wizard(options: WizardOptions): Promise<number> {
   ui.begin(READ_STEP);
   // Before the first turn, so a network failure costs nothing. A turn that
   // runs without the current API costs minutes and integrates the wrong thing.
-  const docs = await fetchDocs(mode, fetchImpl);
+  let docs: Docs;
+  try {
+    docs = await fetchDocs(mode, fetchImpl, signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw new WizardStop(NOTHING_CHANGED, { cause: error });
+    }
+    throw error;
+  }
 
   const conversation = seam.open(agent, cwd);
   const context: TurnContext = { agent, conversation, cwd, mode, signal, ui };
@@ -388,7 +403,14 @@ async function wizard(options: WizardOptions): Promise<number> {
     // The opening contract has been read and acted on by now.
     ui.clear();
     ui.begin(WRITE_STEP);
-    await implement(context, approved, docs);
+    try {
+      await implement(context, approved, docs);
+    } catch (error) {
+      // The turn may have written files before it ended.
+      await reportChanges(cwd, tree, ui);
+      ui.keep(UNFINISHED_CHANGES);
+      throw error;
+    }
     ui.finish(WRITE_STEP);
   } finally {
     await closeQuietly(conversation, ui);

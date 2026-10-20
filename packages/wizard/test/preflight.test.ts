@@ -1,17 +1,20 @@
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   envFilesWithPlaceholder,
   inspectWorkingTree,
   summarizeChanges,
 } from "../src/preflight";
+import { git, isolateGit } from "./git";
 
 const directories: string[] = [];
 
+beforeEach(isolateGit);
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -21,10 +24,6 @@ function temporaryDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), "specify-wizard-"));
   directories.push(directory);
   return directory;
-}
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
 }
 
 function committedRepository(): string {
@@ -49,18 +48,6 @@ describe("inspectWorkingTree", () => {
       changedFiles: 1,
       kind: "dirty",
     });
-  });
-
-  it("reports a committed repository as clean", async () => {
-    const cwd = temporaryDirectory();
-    git(cwd, ["init"]);
-    git(cwd, ["config", "user.email", "wizard@example.com"]);
-    git(cwd, ["config", "user.name", "Specify Wizard"]);
-    writeFileSync(join(cwd, "tracked.txt"), "content");
-    git(cwd, ["add", "tracked.txt"]);
-    git(cwd, ["commit", "-m", "Initial commit"]);
-
-    await expect(inspectWorkingTree(cwd)).resolves.toEqual({ kind: "clean" });
   });
 
   it("reports a plain directory as not a repository", async () => {

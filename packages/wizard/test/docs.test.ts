@@ -1,8 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchDocs } from "../src/docs";
 import type { SdkMode } from "../src/sdk";
 
 const INDEX_URL = "https://docs.specify.sh/llms.txt";
+const INDEX_ERROR =
+  "Could not fetch https://docs.specify.sh/llms.txt. Check your connection and retry.";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function docsFetch(replies: Record<string, Response | Error>): typeof fetch {
   return ((url: string) => {
@@ -15,6 +21,45 @@ function docsFetch(replies: Record<string, Response | Error>): typeof fetch {
       : Promise.resolve(reply);
   }) as unknown as typeof fetch;
 }
+
+function stalledFetch(): typeof fetch {
+  return ((_url: string, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(signal.reason);
+      }
+      signal?.addEventListener("abort", () => reject(signal.reason));
+    })) as unknown as typeof fetch;
+}
+
+describe("fetchDocs on a stalled connection", () => {
+  it("gives up as soon as the run is stopped", async () => {
+    const stopping = new AbortController();
+    const docs = fetchDocs("publisher", stalledFetch(), stopping.signal);
+
+    stopping.abort();
+
+    await expect(docs).rejects.toThrow(INDEX_ERROR);
+  });
+
+  it("gives up at the deadline even while the run carries on", async () => {
+    const deadline = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(deadline.signal);
+    const docs = fetchDocs(
+      "publisher",
+      stalledFetch(),
+      new AbortController().signal
+    );
+
+    deadline.abort();
+
+    await expect(docs).rejects.toThrow(INDEX_ERROR);
+    expect(timeout).toHaveBeenCalledOnce();
+  });
+});
 
 describe.each<{ mode: SdkMode; section: string }>([
   { mode: "publisher", section: "publishing" },
@@ -73,15 +118,29 @@ describe.each<{ mode: SdkMode; section: string }>([
     });
   });
 
+  it("inlines a bundle right at the size limit", async () => {
+    const fetchImpl = docsFetch({
+      [bundleUrl]: new Response("x".repeat(512_000)),
+      [INDEX_URL]: new Response("# Specify"),
+    });
+
+    const docs = await fetchDocs(mode, fetchImpl);
+
+    expect(docs.bundle?.length).toBe(512_000);
+  });
+
   it("still fails the run when the index cannot be fetched", async () => {
     const fetchImpl = docsFetch({
       [bundleUrl]: new Response("# Docs"),
       [INDEX_URL]: new Response("private details", { status: 503 }),
     });
 
-    await expect(fetchDocs(mode, fetchImpl)).rejects.toThrow(
-      "Could not fetch https://docs.specify.sh/llms.txt. Check your connection and retry."
+    const error = await fetchDocs(mode, fetchImpl).catch(
+      (reason: unknown) => reason
     );
+
+    expect(error).toMatchObject({ message: INDEX_ERROR });
+    expect(String(error)).not.toContain("private details");
   });
 
   it("preserves a network failure on the index as the public error cause", async () => {
