@@ -3,7 +3,16 @@ import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SdkMode } from "../src/sdk";
 import { App } from "../src/ui/app";
-import { WizardCancelled, WizardStore } from "../src/ui/store";
+import {
+  type Ask,
+  type Reply,
+  WizardCancelled,
+  WizardStore,
+} from "../src/ui/store";
+
+// React only treats act() as a test boundary with this flag set. Testing
+// Library sets it, ink-testing-library doesn't.
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const PUBLISHER_PLAN = {
   details:
@@ -52,6 +61,18 @@ function count(frame: string, text: string): number {
   return frame.split(text).length - 1;
 }
 
+/**
+ * Ink attaches a prompt's key handler in an effect that runs after the prompt
+ * is drawn, so a key sent as soon as it shows can be lost. act() runs effects
+ * before it resolves.
+ */
+function ask<Value extends Reply>(
+  store: WizardStore,
+  prompt: Ask
+): Promise<{ answer: Promise<Value> }> {
+  return act(() => ({ answer: store.request<Value>(prompt) }));
+}
+
 /** Sends one chunk, the way a terminal delivers a paste or an escape key. */
 async function press(view: View, chunk: string): Promise<void> {
   await act(() => view.stdin.write(chunk));
@@ -79,7 +100,7 @@ describe("App", () => {
 
   it("labels advertiser setup and lets the developer toggle events", async () => {
     const { store, view } = mount("advertiser", TERMINAL);
-    const kept = store.request<string[]>({
+    const { answer: kept } = await ask<string[]>(store, {
       initial: ["purchase", "user_signed_up"],
       kind: "multiselect",
       message: "Which of these events should the agent capture?",
@@ -160,7 +181,7 @@ describe("App", () => {
     // 24 rows leave the plan 13; all 40 lines would fit a tall terminal.
     const { store, view } = mount("publisher", { columns: 100, rows: 24 });
     const lines = Array.from({ length: 40 }, (_, at) => `- Plan line ${at}`);
-    const decision = store.request<string>({
+    const { answer: decision } = await ask<string>(store, {
       kind: "review",
       message: "Go ahead with this plan?",
       options: [
@@ -188,7 +209,7 @@ describe("App", () => {
   it("pages the plan on Ctrl-D and Ctrl-U", async () => {
     const { store, view } = mount("publisher", { columns: 100, rows: 24 });
     const lines = Array.from({ length: 40 }, (_, at) => `- Plan line ${at}`);
-    store.request<string>({
+    await ask(store, {
       kind: "review",
       message: "Go ahead with this plan?",
       options: [{ label: "Approve, make these changes", value: "approve" }],
@@ -207,7 +228,7 @@ describe("App", () => {
 
   it("clears the prompt once it is answered", async () => {
     const { store, view } = mount("publisher", TERMINAL);
-    const answered = store.request<boolean>({
+    const { answer: answered } = await ask<boolean>(store, {
       kind: "confirm",
       message: "Continue anyway?",
     });
@@ -222,7 +243,7 @@ describe("App", () => {
 
   it("collects what the developer types as feedback", async () => {
     const { store, view } = mount("publisher", TERMINAL);
-    const typed = store.request<string>({
+    const { answer: typed } = await ask<string>(store, {
       kind: "text",
       message: "What should the agent do differently?",
     });
@@ -234,7 +255,7 @@ describe("App", () => {
 
   it("accepts pasted feedback and edits at the cursor", async () => {
     const { store, view } = mount("publisher", TERMINAL);
-    const typed = store.request<string>({
+    const { answer: typed } = await ask<string>(store, {
       kind: "text",
       message: "What should the agent do differently?",
     });
@@ -254,7 +275,7 @@ describe("App", () => {
 
   it("submits the placements it was given as the initial choice", async () => {
     const { store, view } = mount("publisher", TERMINAL);
-    const kept = store.request<string[]>({
+    const { answer: kept } = await ask<string[]>(store, {
       initial: ["app/page.tsx", "app/blog/page.tsx"],
       kind: "multiselect",
       message: "Which of these placements should the agent build?",
@@ -288,19 +309,18 @@ describe("App", () => {
     const { store, view } = mount("publisher", TERMINAL, () => {
       aborted = true;
     });
+    const { answer } = await ask<string>(store, {
+      kind: "review",
+      message: "Go ahead with this plan?",
+      options: [{ label: "Approve, make these changes", value: "approve" }],
+      plan: PUBLISHER_PLAN,
+    });
     // The handler goes on before the key is sent: the rejection lands during
     // type(), and attaching after would leave it unhandled for a tick.
-    const decision = store
-      .request<string>({
-        kind: "review",
-        message: "Go ahead with this plan?",
-        options: [{ label: "Approve, make these changes", value: "approve" }],
-        plan: PUBLISHER_PLAN,
-      })
-      .then(
-        () => new Error("the prompt was answered, not cancelled"),
-        (reason: unknown) => reason
-      );
+    const decision = answer.then(
+      () => new Error("the prompt was answered, not cancelled"),
+      (reason: unknown) => reason
+    );
     await screen(view, "Go ahead with this plan?");
     await type(view, "\u0003");
 
