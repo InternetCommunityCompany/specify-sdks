@@ -27,7 +27,7 @@ With a script tag, such as in a tag manager or on a site without a bundler:
   };
   specifyAdvertiser('init', { advertiserKey: 'sak_your_advertiser_key' });
 </script>
-<script async src="https://cdn.jsdelivr.net/npm/@specify-sh/advertiser-sdk@1/dist/script.js"></script>
+<script async src="https://spfsrv.com/sdk/advertiser.js"></script>
 ```
 
 Then call the same methods by name:
