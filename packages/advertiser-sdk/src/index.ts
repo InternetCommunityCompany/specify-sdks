@@ -3,6 +3,7 @@ import {
   MAX_WALLET_ADDRESSES,
 } from "@specify-sh/core";
 
+import { contained } from "./contained.js";
 import {
   type Attempt,
   bodyBytes,
@@ -58,15 +59,6 @@ function identifiesWithoutCookie(identity: Snapshot): boolean {
     identity.userId !== undefined ||
     identity.walletAddresses.length > 0
   );
-}
-
-function contained(run: () => void): boolean {
-  try {
-    run();
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
