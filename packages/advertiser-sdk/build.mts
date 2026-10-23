@@ -25,3 +25,18 @@ const result = await build({
 if (!result.success) {
   throw new Error("Bun failed to build @specify-sh/advertiser-sdk");
 }
+
+const script = await build({
+  drop: ["debugger"],
+  entrypoints: ["./src/script.ts"],
+  env: "disable",
+  format: "iife",
+  minify: true,
+  outdir: "./dist",
+  sourcemap: "external",
+  target: "browser",
+});
+
+if (!script.success) {
+  throw new Error("Bun failed to build the @specify-sh/advertiser-sdk script");
+}

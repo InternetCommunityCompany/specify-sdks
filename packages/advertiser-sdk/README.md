@@ -18,6 +18,26 @@ specify.identify(userId);
 specify.capture('signup');
 ```
 
+With a script tag, such as in a tag manager or on a site without a bundler:
+
+```html
+<script>
+  window.specifyAdvertiser = window.specifyAdvertiser || function () {
+    (specifyAdvertiser.q = specifyAdvertiser.q || []).push(arguments);
+  };
+  specifyAdvertiser('init', { advertiserKey: 'sak_your_advertiser_key' });
+</script>
+<script async src="https://spfsrv.com/sdk/advertiser.js"></script>
+```
+
+Then call the same methods by name:
+
+```js
+specifyAdvertiser('setCookieConsent', consentGiven);
+specifyAdvertiser('identify', userId);
+specifyAdvertiser('capture', 'signup');
+```
+
 On a server:
 
 ```ts

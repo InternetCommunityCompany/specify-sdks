@@ -120,6 +120,8 @@ try {
     "dist/server.d.ts",
     "dist/server.d.ts.map",
     "dist/react-server.js",
+    "dist/script.js",
+    "dist/script.js.map",
     "README.md",
     "LICENSE",
   ]) {
@@ -649,6 +651,46 @@ try {
     { stdio: "inherit" }
   );
   console.log("Verified packed advertiser SDK in Node and a browser bundle");
+
+  const advertiserScript = join(advertiser.directory, "dist", "script.js");
+  if (
+    /\bimport\b|@specify-sh\/core/.test(readFileSync(advertiserScript, "utf8"))
+  ) {
+    throw new Error("The advertiser script tag must bundle everything it uses");
+  }
+  execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
+const dom = new JSDOM("", { runScripts: "outside-only", url: "https://shop.example/?spclk=secret" });
+const browserRequests = [];
+dom.window.TextEncoder = TextEncoder;
+dom.window.fetch = async (url, request) => { browserRequests.push({ request, url }); return { status: 204 }; };
+try {
+  dom.window.eval(\`window.specifyAdvertiser = window.specifyAdvertiser || function () {
+    (specifyAdvertiser.q = specifyAdvertiser.q || []).push(arguments);
+  };
+  specifyAdvertiser("init", { advertiserKey: "sak_0123456789abcdef0123456789abcd" });
+  specifyAdvertiser("identify", "customer");\`);
+  dom.window.eval(readFileSync(process.argv[1], "utf8"));
+  dom.window.eval(\`specifyAdvertiser("setCookieConsent", true);
+  specifyAdvertiser("capture", "purchase");\`);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  if (JSON.stringify(browserRequests.map(({ url, request }) => [url, request.credentials])) !== JSON.stringify([["https://spfsrv.com/v1/identify", "omit"], ["https://spfsrv.com/v1/identify", "include"], ["https://spfsrv.com/v1/events", "include"]])) process.exit(1);
+  const body = JSON.parse(browserRequests[2].request.body);
+  if (body.spclk !== "secret" || body.userId !== "customer" || body.events[0].name !== "purchase") process.exit(1);
+  if (Object.keys(dom.window).filter((key) => key.toLowerCase().includes("specify")).join() !== "specifyAdvertiser") process.exit(1);
+} finally {
+  dom.window.close();
+}`,
+      advertiserScript,
+    ],
+    { stdio: "inherit" }
+  );
+  console.log("Verified the advertiser script tag runs the documented snippet");
 
   const guardMessage = execFileSync(
     "node",
