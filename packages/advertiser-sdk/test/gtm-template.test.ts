@@ -71,7 +71,6 @@ describe("GTM template with the advertiser SDK", () => {
       action: "init",
       advertiserKey: KEY,
       apiUrl: API,
-      scriptUrl: "https://spfsrv.com/sdk/advertiser.js",
     });
 
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
@@ -93,7 +92,7 @@ describe("GTM template with the advertiser SDK", () => {
 
   it("holds an unidentified event until an explicit consent grant", async () => {
     const { run, fetchSpy } = setup();
-    run({ action: "init", advertiserKey: KEY, apiUrl: API, scriptUrl: "sdk" });
+    run({ action: "init", advertiserKey: KEY, apiUrl: API });
     run({ action: "capture", eventName: "signup" });
     const unknown = run({ action: "setCookieConsent" });
     expect(unknown.gtmOnFailure).toHaveBeenCalledOnce();
@@ -112,7 +111,6 @@ describe("GTM template with the advertiser SDK", () => {
         action: "init",
         advertiserKey: KEY,
         apiUrl: API,
-        scriptUrl: "sdk",
       });
       run({ action: "setCookieConsent", cookieConsent: true });
       run({ action: "identify", identity: "customer" });
@@ -131,7 +129,7 @@ describe("GTM template with the advertiser SDK", () => {
 
   it("passes wallet arrays through and clears both wallets and user ID on logout", async () => {
     const { run, fetchSpy } = setup();
-    run({ action: "init", advertiserKey: KEY, apiUrl: API, scriptUrl: "sdk" });
+    run({ action: "init", advertiserKey: KEY, apiUrl: API });
     run({ action: "identify", identity: [WALLET] });
     run({ action: "identify", identity: "first-user" });
     run({ action: "capture", eventName: "before-logout" });
@@ -162,21 +160,23 @@ describe("GTM template with the advertiser SDK", () => {
       action: "init",
       advertiserKey: KEY,
       apiUrl: API,
-      scriptUrl: "sdk",
     });
     expect(data.gtmOnFailure).toHaveBeenCalledOnce();
     expect(data.gtmOnSuccess).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("can use a separately loaded local script without downloading another", () => {
+  it("waits for the SDK script to load before reporting success", () => {
     const { run, injectScript, entry } = setup();
+    injectScript.mockImplementationOnce(() => undefined);
     const data = run({ action: "init", advertiserKey: KEY, apiUrl: API });
     expect(entry).toHaveBeenCalledWith("init", {
       advertiserKey: KEY,
       apiUrl: API,
     });
-    expect(injectScript).not.toHaveBeenCalled();
+    expect(injectScript).toHaveBeenCalledOnce();
+    expect(data.gtmOnSuccess).not.toHaveBeenCalled();
+    injectScript.mock.calls[0]?.[1]();
     expect(data.gtmOnSuccess).toHaveBeenCalledOnce();
   });
 

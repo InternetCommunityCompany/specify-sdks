@@ -71,21 +71,6 @@ ___TEMPLATE_PARAMETERS___
   },
   {
     "type": "TEXT",
-    "name": "scriptUrl",
-    "displayName": "SDK script URL",
-    "simpleValueType": true,
-    "defaultValue": "",
-    "help": "Use https://spfsrv.com/sdk/advertiser.js for a normal installation. Leave empty only when the SDK is loaded separately.",
-    "enablingConditions": [
-      {
-        "paramName": "action",
-        "paramValue": "init",
-        "type": "EQUALS"
-      }
-    ]
-  },
-  {
-    "type": "TEXT",
     "name": "apiUrl",
     "displayName": "API URL",
     "simpleValueType": true,
@@ -177,11 +162,8 @@ const specify = createArgumentsQueue('specifyAdvertiser', 'specifyAdvertiser.q')
 switch (data.action) {
   case 'init':
     specify('init', {advertiserKey: data.advertiserKey, apiUrl: data.apiUrl});
-    if (data.scriptUrl) {
-      injectScript(data.scriptUrl, data.gtmOnSuccess, data.gtmOnFailure, 'specify-advertiser');
-      return;
-    }
-    break;
+    injectScript('https://spfsrv.com/sdk/advertiser.js', data.gtmOnSuccess, data.gtmOnFailure, 'specify-advertiser');
+    return;
   case 'setCookieConsent':
     if (data.cookieConsent !== true && data.cookieConsent !== false &&
         data.cookieConsent !== 'true' && data.cookieConsent !== 'false') {
@@ -346,8 +328,11 @@ scenarios:
   code: |-
     const commands = [];
     mock('createArgumentsQueue', () => (name, value) => commands.push(name === 'reset' ? [name] : [name, value]));
-    mock('injectScript', (url, success) => success());
-    runCode({action: 'init', advertiserKey: 'sak_test', apiUrl: 'http://localhost:3001', scriptUrl: 'https://spfsrv.com/sdk/advertiser.js'});
+    mock('injectScript', (url, success) => {
+      assertThat(url).isEqualTo('https://spfsrv.com/sdk/advertiser.js');
+      success();
+    });
+    runCode({action: 'init', advertiserKey: 'sak_test', apiUrl: 'http://localhost:3001'});
     assertThat(commands).isEqualTo([['init', {advertiserKey: 'sak_test', apiUrl: 'http://localhost:3001'}]]);
     assertApi('injectScript').wasCalled();
     assertApi('gtmOnSuccess').wasCalled();
@@ -356,7 +341,7 @@ scenarios:
   code: |-
     mock('createArgumentsQueue', () => () => {});
     mock('injectScript', (url, success, failure) => failure());
-    runCode({action: 'init', advertiserKey: 'sak_test', apiUrl: 'http://localhost:3001', scriptUrl: 'https://spfsrv.com/sdk/advertiser.js'});
+    runCode({action: 'init', advertiserKey: 'sak_test', apiUrl: 'http://localhost:3001'});
     assertApi('gtmOnFailure').wasCalled();
     assertApi('gtmOnSuccess').wasNotCalled();
 - name: Actions forward consent, wallet arrays, capture and reset separately
