@@ -90,6 +90,32 @@ describe("Specify", () => {
   });
 
   describe("serve", () => {
+    it.each([undefined, false, true])(
+      "forwards showAdLabel %s",
+      async (showAdLabel) => {
+        const specify = createSpecify();
+        const response = {
+          ...mockAd,
+          imageUrl: showAdLabel
+            ? "https://example.com/image-tag.jpg"
+            : mockAd.imageUrl,
+        };
+        const { requests } = setupMockFetch(response);
+        await expect(
+          specify.serve(VALID_MOCK_WALLET_ADDRESS, {
+            imageFormat: ImageFormat.LANDSCAPE,
+            showAdLabel,
+          })
+        ).resolves.toEqual(response);
+        expect(requestBody(requests[0] ?? {})).toEqual({
+          cookieConsent: false,
+          imageFormat: ImageFormat.LANDSCAPE,
+          walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+          ...(showAdLabel === undefined ? {} : { showAdLabel }),
+        });
+      }
+    );
+
     it("returns an ad for a valid wallet address", async () => {
       const specify = createSpecify();
       setupMockFetch(mockAd);
@@ -411,10 +437,14 @@ describe("Specify", () => {
         const { requests } = setupMockFetch(mockAd);
 
         specify.setCookieConsent(true);
-        await specify.serve({ imageFormat: ImageFormat.LONG_BANNER });
+        await specify.serve({
+          imageFormat: ImageFormat.LONG_BANNER,
+          showAdLabel: true,
+        });
 
         expect(requestBody(requests[0] ?? {})).toMatchObject({
           imageFormat: ImageFormat.LONG_BANNER,
+          showAdLabel: true,
           walletAddresses: [],
         });
       });

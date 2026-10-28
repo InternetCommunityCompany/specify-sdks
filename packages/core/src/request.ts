@@ -8,6 +8,7 @@ export interface AdRequest {
   credentials?: "include" | "omit" | "same-origin";
   imageFormat: ImageFormat;
   publisherKey: string;
+  showAdLabel?: boolean;
   walletAddresses: Address[];
 }
 
@@ -18,6 +19,7 @@ export async function requestAd(request: AdRequest): Promise<SpecifyAd | null> {
         adUnitId: request.adUnitId,
         cookieConsent: request.cookieConsent,
         imageFormat: request.imageFormat,
+        showAdLabel: request.showAdLabel,
         walletAddresses: request.walletAddresses,
       }),
       credentials: request.credentials,

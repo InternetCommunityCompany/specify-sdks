@@ -47,6 +47,29 @@ function options(walletAddresses: Address[] = [VALID_MOCK_WALLET_ADDRESS]) {
 }
 
 describe("serve", () => {
+  it.each([undefined, false, true])(
+    "forwards showAdLabel %s without changing the returned image",
+    async (showAdLabel) => {
+      const response = {
+        ...mockAd,
+        imageUrl: showAdLabel
+          ? "https://example.com/image-tag.jpg"
+          : mockAd.imageUrl,
+      };
+      const { requests } = setupMockFetch(response);
+
+      await expect(serve({ ...options(), showAdLabel })).resolves.toEqual(
+        response
+      );
+      expect(requestBody(requests[0] ?? {})).toEqual({
+        adUnitId: "header",
+        imageFormat: ImageFormat.LANDSCAPE,
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        ...(showAdLabel === undefined ? {} : { showAdLabel }),
+      });
+    }
+  );
+
   it("returns a 200 body exactly as received", async () => {
     const response = { ...mockAd, serviceMetadata: "unchanged" };
     globalThis.fetch = vi.fn().mockResolvedValue(Response.json(response));

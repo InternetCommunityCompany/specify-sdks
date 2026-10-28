@@ -25,6 +25,8 @@ export interface ServeOptions {
   imageFormat: ImageFormat;
   /** Your publisher key, which starts with spk_ */
   publisherKey: string;
+  /** Request an image with an 'Ad' label; defaults to false */
+  showAdLabel?: boolean;
   /** One or more wallet addresses to match against */
   walletAddresses: Address[];
 }
@@ -62,6 +64,7 @@ export async function serve(options: ServeOptions): Promise<SpecifyAd | null> {
     adUnitId: options.adUnitId,
     imageFormat: options.imageFormat,
     publisherKey: options.publisherKey,
+    showAdLabel: options.showAdLabel,
     walletAddresses,
   });
 }

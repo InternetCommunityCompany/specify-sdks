@@ -10,6 +10,8 @@ export interface UseSpecifyAdOptions {
   adUnitId?: string;
   /** The image format to request */
   imageFormat: ImageFormat;
+  /** Request an image with an 'Ad' label; defaults to false */
+  showAdLabel?: boolean;
   /** The Specify client to serve through. Create it once and reuse the same instance on every render. */
   specify: Specify;
 }
@@ -70,6 +72,7 @@ export function useSpecifyAd(
   const specify = options?.specify;
   const imageFormat = options?.imageFormat;
   const adUnitId = options?.adUnitId;
+  const showAdLabel = options?.showAdLabel;
   const filled = ad !== null;
 
   useEffect(() => {
@@ -79,7 +82,11 @@ export function useSpecifyAd(
     let active = true;
     const request = () => {
       specify
-        .serve(walletKey.split(",") as Address[], { adUnitId, imageFormat })
+        .serve(walletKey.split(",") as Address[], {
+          adUnitId,
+          imageFormat,
+          showAdLabel,
+        })
         .then((result) => {
           if (active && result) {
             setAd((current) => current ?? result);
@@ -95,7 +102,7 @@ export function useSpecifyAd(
       active = false;
       unsubscribe();
     };
-  }, [adUnitId, filled, imageFormat, specify, walletKey]);
+  }, [adUnitId, filled, imageFormat, showAdLabel, specify, walletKey]);
 
   return ad;
 }

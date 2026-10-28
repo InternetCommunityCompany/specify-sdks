@@ -90,6 +90,67 @@ describe.runIf(typeof window !== "undefined")("useSpecifyAd", () => {
     cleanup();
   });
 
+  it.each([undefined, false, true])(
+    "forwards showAdLabel %s",
+    async (showAdLabel) => {
+      const specify = createSpecify();
+      const { requests } = setupServeQueue([adResponse(mockAd)]);
+
+      const { result } = renderHook(() =>
+        useSpecifyAd([VALID_MOCK_WALLET_ADDRESS], {
+          imageFormat: ImageFormat.LANDSCAPE,
+          showAdLabel,
+          specify,
+        })
+      );
+
+      await waitFor(() => expect(result.current).toEqual(mockAd));
+      expect(requestBody(requests[0] ?? {})).toEqual({
+        cookieConsent: false,
+        imageFormat: ImageFormat.LANDSCAPE,
+        walletAddresses: [VALID_MOCK_WALLET_ADDRESS],
+        ...(showAdLabel === undefined ? {} : { showAdLabel }),
+      });
+    }
+  );
+
+  it("uses the latest label preference until the slot fills, then keeps its first ad", async () => {
+    const specify = createSpecify();
+    const taggedAd = {
+      ...mockAd,
+      imageUrl: "https://example.com/image-tag.jpg",
+    };
+    const { fetch, requests } = setupServeQueue([
+      noFillResponse(),
+      adResponse(taggedAd),
+    ]);
+    const { result, rerender } = renderHook(
+      ({ showAdLabel }) =>
+        useSpecifyAd([VALID_MOCK_WALLET_ADDRESS], {
+          imageFormat: ImageFormat.LANDSCAPE,
+          showAdLabel,
+          specify,
+        }),
+      { initialProps: { showAdLabel: false } }
+    );
+
+    await flushServes();
+    expect(result.current).toBeNull();
+    expect(requestBody(requests[0] ?? {})).toMatchObject({
+      showAdLabel: false,
+    });
+
+    rerender({ showAdLabel: true });
+    await waitFor(() => expect(result.current).toEqual(taggedAd));
+    expect(requestBody(requests[1] ?? {})).toMatchObject({ showAdLabel: true });
+
+    rerender({ showAdLabel: false });
+    await flushServes();
+
+    expect(result.current).toEqual(taggedAd);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("serves on mount with the given wallets", async () => {
     const specify = createSpecify();
     const { requests } = setupServeQueue([adResponse(mockAd)]);
